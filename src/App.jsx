@@ -20,8 +20,8 @@ import {
    painel do Supabase → Project Settings → API → "Project URL" e
    a chave "anon public" (a chave "service_role" NUNCA vai aqui).
    ============================================================ */
-const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO_SUPABASE";
-const SUPABASE_ANON_KEY = "COLE_AQUI_A_CHAVE_ANON_PUBLIC";
+const SUPABASE_URL = "https://wvjznkqdmmidudwdvqqc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_XTxSZL05rQhMSU0cFOFxpQ_L11jLiZD";
 const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith("http");
 const supabase = createClient(
   SUPABASE_CONFIGURADO ? SUPABASE_URL : "https://placeholder.supabase.co",
@@ -242,13 +242,10 @@ function instantiateDocumentos(templateId) {
 }
 
 function documentosProgress(documentos) {
-  let total = 0, ok = 0;
-  documentos.categorias.forEach((c) => c.itens.forEach((it) => {
-    if (!it.aplicavel) return;
-    total += 1;
-    if (it.estado === "anexado" || it.estado === "nao_aplica") ok += 1;
-  }));
-  return total === 0 ? 100 : Math.round((ok / total) * 100);
+  const itens = (documentos && documentos.itens) || [];
+  if (itens.length === 0) return 100;
+  const ok = itens.filter((it) => it.status !== "Pendente").length;
+  return Math.round((ok / itens.length) * 100);
 }
 
 function emptyParametrosUrbanisticos() {
@@ -345,8 +342,8 @@ function baseProcesso(p) {
     cobrancas: p.cobrancas || [], pendenciaCliente: p.pendenciaCliente || { ativa: false, descricao: "" },
     ultimaAtualizacao: p.ultimaAtualizacao || d(0),
     site: p.site || "-", login: p.login || "-", senha: p.senha || "-",
-    checklist: p.checklist || instantiateChecklist(pickTemplateId(p.assunto)),
-    documentos: p.documentos || instantiateDocumentos(pickTemplateId(p.assunto)),
+    checklist: p.checklist || { itens: [] },
+    documentos: p.documentos || { itens: [] },
     responsaveisTecnicos: p.responsaveisTecnicos || [],
     parametrosUrbanisticos: p.parametrosUrbanisticos || emptyParametrosUrbanisticos(),
     enquadramentos: p.enquadramentos || emptyEnquadramentos(),
@@ -383,8 +380,8 @@ function rowToProcesso(r) {
     ultimaAtualizacao: r.ultima_atualizacao,
     site: r.site, login: r.login, senha: r.senha,
     dependeDeId: r.depende_de_id,
-    checklist: (r.checklist && r.checklist.secoes) ? r.checklist : undefined,
-    documentos: (r.documentos && r.documentos.categorias) ? r.documentos : undefined,
+    checklist: (r.checklist && r.checklist.itens) ? r.checklist : undefined,
+    documentos: (r.documentos && r.documentos.itens) ? r.documentos : undefined,
     responsaveisTecnicos: r.responsaveis_tecnicos || [],
     parametrosUrbanisticos: (r.parametros_urbanisticos && Object.keys(r.parametros_urbanisticos).length) ? r.parametros_urbanisticos : undefined,
     enquadramentos: (r.enquadramentos && Object.keys(r.enquadramentos).length) ? r.enquadramentos : undefined,
@@ -494,13 +491,11 @@ function fmtDateTime(iso) {
   return `${fmtDate(iso.slice(0, 10))} às ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 function checklistProgress(checklist) {
-  let total = 0, ok = 0;
-  checklist.secoes.forEach((s) => s.itens.forEach((it) => {
-    if (it.estado === "na") return;
-    total += 1;
-    if (it.estado === "conforme") ok += 1;
-  }));
-  return total === 0 ? 100 : Math.round((ok / total) * 100);
+  const itens = (checklist && checklist.itens) || [];
+  const aplicaveis = itens.filter((it) => it.status !== "N/A");
+  if (aplicaveis.length === 0) return 100;
+  const ok = aplicaveis.filter((it) => it.status === "Temos").length;
+  return Math.round((ok / aplicaveis.length) * 100);
 }
 function csvEscape(v) {
   const s = (v === null || v === undefined) ? "" : String(v);
@@ -525,13 +520,13 @@ function fmtBytes(n) {
 /* Monta a lista de pendências que bloqueiam um protocolo de qualidade */
 function pendenciasProtocolo(processo) {
   const pendencias = [];
-  processo.documentos.categorias.forEach((c) => c.itens.forEach((it) => {
-    if (it.aplicavel && it.obrigatorio && it.estado === "pendente") pendencias.push(`Documento pendente: ${it.texto} (${c.titulo})`);
-  }));
-  processo.checklist.secoes.forEach((s) => s.itens.forEach((it) => {
-    if (it.estado === "nao_conforme") pendencias.push(`Checklist técnico não conforme: ${it.texto} (${s.titulo})`);
-    if (it.estado === "pendente") pendencias.push(`Checklist técnico pendente: ${it.texto} (${s.titulo})`);
-  }));
+  (processo.documentos.itens || []).forEach((it) => {
+    if (it.status === "Pendente") pendencias.push(`Documento pendente: ${it.nome}`);
+    if (it.validade && new Date(it.validade) < hoje) pendencias.push(`Documento com validade vencida: ${it.nome} (venceu em ${fmtDate(it.validade)})`);
+  });
+  (processo.checklist.itens || []).forEach((it) => {
+    if (it.status === "Não temos") pendencias.push(`Checklist: item faltando — ${it.item}`);
+  });
   if (processo.responsaveisTecnicos.length === 0) pendencias.push("Nenhum responsável técnico cadastrado.");
   processo.responsaveisTecnicos.forEach((r) => {
     if (!r.nome || !r.registroNumero || !r.art) pendencias.push(`Dados incompletos do responsável técnico "${r.nome || "sem nome"}".`);
@@ -550,8 +545,8 @@ function gerarRelatorioHTML(processo) {
   const chkPct = checklistProgress(processo.checklist);
   const pendencias = pendenciasProtocolo(processo);
   const pronto = pendencias.length === 0;
-  const linhaDoc = (it) => `<tr><td>${it.texto}</td><td>${it.estado === "anexado" ? "Anexado" : it.estado === "nao_aplica" ? "Não se aplica" : "Pendente"}</td><td>${it.arquivo ? it.arquivo.nome : ""}</td></tr>`;
-  const linhaChk = (it) => `<tr><td>${it.texto}</td><td>${it.estado === "conforme" ? "Conforme" : it.estado === "nao_conforme" ? "Não conforme" : it.estado === "na" ? "Não se aplica" : "Pendente"}</td><td>${it.obs || ""}</td></tr>`;
+  const linhaDoc = (it) => `<tr><td>${it.nome}</td><td>${it.descricao || ""}</td><td>${it.status}</td><td>${fmtDate(it.validade)}</td><td>${it.observacao || ""}</td></tr>`;
+  const linhaChk = (it) => `<tr><td>${it.item}</td><td>${it.status}</td></tr>`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório — ${processo.assunto}</title>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:32px;max-width:900px;margin:0 auto;}
@@ -565,7 +560,7 @@ function gerarRelatorioHTML(processo) {
     .pend{margin:4px 0;font-size:12.5px;} .meta{font-size:12px;color:#555;margin-top:4px;}
   </style></head><body>
   <h1>Relatório de conformidade — ${processo.assunto}</h1>
-  <div class="meta">${processo.cliente} — ${processo.unidade} · ${processo.cidade}/${processo.uf} · Processo nº ${processo.numero}</div>
+  <div class="meta">${processo.cliente} — ${processo.unidade} · ${processo.cidade}/${processo.uf} · ${processo.tipo === "Serviço Técnico" ? "Serviço" : "Processo"} nº ${processo.numero}</div>
   <div class="meta">Gerado em ${fmtDate(new Date().toISOString().slice(0,10))} · Primers Consultoria e Legalização Imobiliária</div>
   <p style="margin-top:16px;">
     <span class="badge ${pronto ? "ok" : "warn"}">${pronto ? "Pronto para protocolo" : `${pendencias.length} pendência(s) para protocolo`}</span>
@@ -573,16 +568,14 @@ function gerarRelatorioHTML(processo) {
     <span class="badge ${chkPct === 100 ? "ok" : "warn"}">Checklist técnico ${chkPct}%</span>
   </p>
   ${pendencias.length > 0 ? `<h2>Pendências identificadas</h2>${pendencias.map((p) => `<div class="pend">• ${p}</div>`).join("")}` : ""}
-  <h2>Documentos exigidos</h2>
-  ${processo.documentos.categorias.map((c) => `<b>${c.titulo}</b><table><tr><th>Item</th><th>Status</th><th>Arquivo</th></tr>${c.itens.filter((i) => i.aplicavel).map(linhaDoc).join("")}</table>`).join("")}
-  <h2>Checklist técnico</h2>
-  ${processo.checklist.secoes.map((s) => `<b>${s.titulo}</b><table><tr><th>Item</th><th>Status</th><th>Observação</th></tr>${s.itens.map(linhaChk).join("")}</table>`).join("")}
+  <h2>Documentos recebidos / obtidos</h2>
+  <table><tr><th>Documento</th><th>Descrição</th><th>Status</th><th>Validade</th><th>Observação</th></tr>${(processo.documentos.itens || []).map(linhaDoc).join("") || `<tr><td colspan="5">Nenhum documento registrado ainda.</td></tr>`}</table>
+  <h2>Checklist</h2>
+  <table><tr><th>Item exigido</th><th>Status</th></tr>${(processo.checklist.itens || []).map(linhaChk).join("") || `<tr><td colspan="2">Nenhum item de checklist registrado ainda.</td></tr>`}</table>
   <h2>Responsáveis técnicos</h2>
   <table><tr><th>Vínculo</th><th>Nome</th><th>CPF</th><th>Registro</th><th>CCM</th><th>ART/RRT</th></tr>
   ${processo.responsaveisTecnicos.map((r) => `<tr><td>${r.vinculo}</td><td>${r.nome}</td><td>${r.cpf}</td><td>${r.registroTipo} ${r.registroNumero}</td><td>${r.ccm}</td><td>${r.art}</td></tr>`).join("") || `<tr><td colspan="6">Nenhum responsável técnico cadastrado.</td></tr>`}
   </table>
-  <h2>Parâmetros urbanísticos</h2>
-  <table>${PARAM_URB_FIELDS.map(([k, label]) => `<tr><td>${label}</td><td>${processo.parametrosUrbanisticos[k] || "—"}</td></tr>`).join("")}</table>
   <h2>Enquadramentos especiais</h2>
   <table><tr><th>Enquadramento</th><th>Aplica?</th><th>Observação</th></tr>
   ${Object.entries(processo.enquadramentos).map(([k, v]) => `<tr><td>${ENQUADRAMENTOS_LABELS[k]}</td><td>${v.aplica ? "Sim" : "Não"}</td><td>${v.obs || ""}</td></tr>`).join("")}
@@ -834,73 +827,64 @@ function NewProcessModal({ onClose, onSave, processos, isAdmin }) {
    CHECKLIST TAB
    ============================================================ */
 function ChecklistTab({ processo, onUpdate }) {
-  const setItemState = (si, ii, estado) => {
-    const checklist = JSON.parse(JSON.stringify(processo.checklist));
-    checklist.secoes[si].itens[ii].estado = checklist.secoes[si].itens[ii].estado === estado ? "pendente" : estado;
-    onUpdate({ ...processo, checklist });
-  };
-  const setItemObs = (si, ii, obs) => {
-    const checklist = JSON.parse(JSON.stringify(processo.checklist));
-    checklist.secoes[si].itens[ii].obs = obs;
-    onUpdate({ ...processo, checklist });
-  };
-  const templateNome = (CHECKLIST_TEMPLATES[processo.checklist.templateId] || CHECKLIST_TEMPLATES.default).nome;
+  const [novoItem, setNovoItem] = useState("");
+  const itens = processo.checklist.itens || [];
   const progresso = checklistProgress(processo.checklist);
 
-  const StateBtn = ({ active, color, icon: Icon, onClick, title }) => (
-    <button onClick={onClick} title={title} style={{
-      width: 26, height: 26, borderRadius: 6, border: `1px solid ${active ? color : COLORS.border}`,
-      background: active ? `${color}22` : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-    }}>
-      <Icon size={14} color={active ? color : COLORS.steel} />
-    </button>
-  );
+  const adicionar = () => {
+    if (!novoItem.trim()) return;
+    const novo = { id: `chk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, item: novoItem.trim(), status: "Não temos" };
+    onUpdate({ ...processo, checklist: { itens: [...itens, novo] } });
+    setNovoItem("");
+  };
+  const setStatus = (id, status) => {
+    onUpdate({ ...processo, checklist: { itens: itens.map((it) => (it.id === id ? { ...it, status } : it)) } });
+  };
+  const remover = (id) => {
+    onUpdate({ ...processo, checklist: { itens: itens.filter((it) => it.id !== id) } });
+  };
+
+  const STATUS_CHECKLIST = { "Temos": { cor: COLORS.green, icon: CheckCircle2 }, "Não temos": { cor: COLORS.red, icon: XCircle }, "N/A": { cor: COLORS.steel, icon: MinusCircle } };
 
   return (
     <div>
+      <p style={{ fontSize: 12, color: COLORS.steel, lineHeight: 1.6, marginBottom: 16 }}>
+        Relação dos documentos/itens exigidos para este {processo.tipo === "Serviço Técnico" ? "serviço" : "processo"}. Adicione cada item necessário e marque se já temos ou não.
+      </p>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Template</div>
-          <div style={{ fontSize: 14, color: COLORS.ice, fontWeight: 600, fontFamily: "'Oswald', sans-serif" }}>{templateNome}</div>
-        </div>
+        <div style={{ fontSize: 12.5, color: COLORS.steelLight }}>{itens.length} item(ns) cadastrado(s)</div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conformidade</div>
           <div style={{ fontSize: 20, color: progresso === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progresso}%</div>
         </div>
       </div>
-      {processo.checklist.secoes.map((sec, si) => {
-        const secProg = checklistProgress({ secoes: [sec] });
-        return (
-          <div key={si} style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.steelLight, textTransform: "uppercase", letterSpacing: "0.04em" }}>{sec.titulo}</div>
-              <div style={{ fontSize: 11, color: COLORS.steel }}>{secProg}%</div>
-            </div>
-            <div style={{ height: 4, background: COLORS.panelAlt, borderRadius: 2, marginBottom: 10, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${secProg}%`, background: secProg === 100 ? COLORS.green : COLORS.orange }} />
-            </div>
-            {sec.itens.map((it, ii) => (
-              <div key={it.id} style={{ padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, color: COLORS.ice }}>{it.texto}</div>
-                    {it.detalhe && <div style={{ fontSize: 11, color: COLORS.steel, marginTop: 3, lineHeight: 1.5 }}>{it.detalhe}</div>}
-                  </div>
-                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                    <StateBtn active={it.estado === "conforme"} color={COLORS.green} icon={CheckCircle2} title="Conforme" onClick={() => setItemState(si, ii, "conforme")} />
-                    <StateBtn active={it.estado === "nao_conforme"} color={COLORS.red} icon={XCircle} title="Não conforme" onClick={() => setItemState(si, ii, "nao_conforme")} />
-                    <StateBtn active={it.estado === "na"} color={COLORS.steel} icon={MinusCircle} title="Não se aplica" onClick={() => setItemState(si, ii, "na")} />
-                  </div>
-                </div>
-                {it.estado === "nao_conforme" && (
-                  <input value={it.obs} onChange={(e) => setItemObs(si, ii, e.target.value)} placeholder="Observação sobre a não conformidade..."
-                    style={{ marginTop: 6, width: "100%", background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 9px", color: COLORS.ice, fontSize: 11.5, outline: "none" }} />
-                )}
-              </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <input value={novoItem} onChange={(e) => setNovoItem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && adicionar()}
+          placeholder="Nome do documento/item exigido (ex: Matrícula do imóvel)..."
+          style={{ flex: 1, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "9px 11px", color: COLORS.ice, fontSize: 12.5, outline: "none" }} />
+        <button onClick={adicionar} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 6, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
+          <Plus size={13} /> Adicionar
+        </button>
+      </div>
+
+      {itens.length === 0 && <div style={{ padding: 24, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum item cadastrado ainda.</div>}
+      {itens.map((it) => (
+        <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
+          <div style={{ fontSize: 12.5, color: COLORS.ice, flex: 1 }}>{it.item}</div>
+          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+            {Object.entries(STATUS_CHECKLIST).map(([s, cfg]) => (
+              <button key={s} onClick={() => setStatus(it.id, s)} title={s} style={{
+                width: 26, height: 26, borderRadius: 6, border: `1px solid ${it.status === s ? cfg.cor : COLORS.border}`,
+                background: it.status === s ? `${cfg.cor}22` : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+              }}><cfg.icon size={14} color={it.status === s ? cfg.cor : COLORS.steel} /></button>
             ))}
+            <button onClick={() => remover(it.id)} title="Remover item" style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${COLORS.red}55`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <Trash2 size={12} color={COLORS.red} />
+            </button>
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -910,16 +894,18 @@ function ChecklistTab({ processo, onUpdate }) {
    técnicos e enquadramentos especiais
    ============================================================ */
 function DocumentosTab({ processo, onUpdate }) {
-  const patchDoc = (ci, ii, fields) => {
-    const documentos = JSON.parse(JSON.stringify(processo.documentos));
-    Object.assign(documentos.categorias[ci].itens[ii], fields);
-    onUpdate({ ...processo, documentos });
-  };
-  const anexar = (ci, ii, file) => {
-    if (!file) return;
-    patchDoc(ci, ii, { estado: "anexado", arquivo: { nome: file.name, tamanho: file.size } });
-  };
+  const itens = processo.documentos.itens || [];
   const progresso = documentosProgress(processo.documentos);
+  const [novo, setNovo] = useState({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "" });
+
+  const adicionar = () => {
+    if (!novo.nome.trim()) return;
+    const item = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: novo.nome.trim(), descricao: novo.descricao.trim(), status: novo.status, validade: novo.validade || null, observacao: novo.observacao.trim() };
+    onUpdate({ ...processo, documentos: { itens: [...itens, item] } });
+    setNovo({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "" });
+  };
+  const patchItem = (id, fields) => onUpdate({ ...processo, documentos: { itens: itens.map((it) => (it.id === id ? { ...it, ...fields } : it)) } });
+  const remover = (id) => onUpdate({ ...processo, documentos: { itens: itens.filter((it) => it.id !== id) } });
 
   const addResponsavel = () => onUpdate({ ...processo, responsaveisTecnicos: [...processo.responsaveisTecnicos, novoResponsavelTecnico()] });
   const patchResponsavel = (id, fields) => onUpdate({ ...processo, responsaveisTecnicos: processo.responsaveisTecnicos.map((r) => (r.id === id ? { ...r, ...fields } : r)) });
@@ -927,70 +913,62 @@ function DocumentosTab({ processo, onUpdate }) {
 
   const patchEnquadramento = (k, fields) => onUpdate({ ...processo, enquadramentos: { ...processo.enquadramentos, [k]: { ...processo.enquadramentos[k], ...fields } } });
 
+  const STATUS_DOC_OPCOES = ["Recebido", "Obtido", "Pendente"];
+  const corStatusDoc = (s) => s === "Pendente" ? COLORS.orange : COLORS.green;
+
   return (
     <div>
-      <div style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 14px", fontSize: 11.5, color: COLORS.steelLight, marginBottom: 18, lineHeight: 1.5 }}>
-        Nesta fase do MVP os anexos ficam registrados pelo nome do arquivo para fins de conferência — o armazenamento definitivo dos documentos entra na versão integrada ao sistema.
-      </div>
+      <p style={{ fontSize: 12, color: COLORS.steel, lineHeight: 1.6, marginBottom: 16 }}>
+        Análise documental: registre aqui cada documento recebido do cliente ou obtido junto ao órgão, com descrição, status e validade.
+      </p>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontSize: 14, color: COLORS.ice, fontWeight: 600, fontFamily: "'Oswald', sans-serif" }}>
-          {(DOC_TEMPLATES[processo.documentos.templateId] || DOC_TEMPLATES.default).nome}
+        <div style={{ fontSize: 12.5, color: COLORS.steelLight }}>{itens.length} documento(s) registrado(s)</div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recebidos/obtidos</div>
+          <div style={{ fontSize: 20, color: progresso === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progresso}%</div>
         </div>
-        <div style={{ fontSize: 20, color: progresso === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progresso}%</div>
       </div>
 
-      {processo.documentos.categorias.map((cat, ci) => (
-        <div key={ci} style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.steelLight, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>{cat.titulo}</div>
-          {cat.itens.map((it, ii) => (
-            <div key={it.id} style={{ padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-              {it.condicionalLabel && (
-                <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, cursor: "pointer" }}>
-                  <input type="checkbox" checked={it.aplicavel} onChange={(e) => patchDoc(ci, ii, { aplicavel: e.target.checked, estado: e.target.checked ? "pendente" : "nao_aplica" })} />
-                  <span style={{ fontSize: 11.5, color: COLORS.steel }}>{it.condicionalLabel}</span>
-                </label>
-              )}
-              {it.aplicavel && (
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12.5, color: COLORS.ice }}>{it.texto}{it.obrigatorio && <span style={{ color: COLORS.red }}> *</span>}</div>
-                      {it.detalhe && <div style={{ fontSize: 11, color: COLORS.steel, marginTop: 3 }}>{it.detalhe}</div>}
-                      {it.arquivo && <div style={{ fontSize: 11, color: COLORS.green, marginTop: 4 }}>{it.arquivo.nome} ({fmtBytes(it.arquivo.tamanho)})</div>}
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 5, background: it.estado === "anexado" ? COLORS.greenDim : "transparent", border: `1px solid ${it.estado === "anexado" ? COLORS.green : COLORS.border}`, color: it.estado === "anexado" ? COLORS.green : COLORS.steelLight, borderRadius: 6, padding: "5px 10px", fontSize: 11.5, cursor: "pointer" }}>
-                        <Upload size={12} /> {it.estado === "anexado" ? "Substituir" : "Anexar"}
-                        <input type="file" style={{ display: "none" }} onChange={(e) => anexar(ci, ii, e.target.files[0])} />
-                      </label>
-                      <button onClick={() => patchDoc(ci, ii, { estado: it.estado === "nao_aplica" ? "pendente" : "nao_aplica" })}
-                        title="Não se aplica" style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${it.estado === "nao_aplica" ? COLORS.steel : COLORS.border}`, background: it.estado === "nao_aplica" ? COLORS.grayDim : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                        <MinusCircle size={13} color={it.estado === "nao_aplica" ? COLORS.steelLight : COLORS.steel} />
-                      </button>
-                    </div>
-                  </div>
-                  {it.estado === "anexado" && (
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.03em" }}>Validade:</span>
-                      {["valido", "invalido"].map((v) => (
-                        <button key={v} onClick={() => patchDoc(ci, ii, { validade: it.validade === v ? null : v })}
-                          style={{
-                            fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "3px 10px", cursor: "pointer",
-                            background: it.validade === v ? (v === "valido" ? COLORS.greenDim : COLORS.redDim) : "transparent",
-                            color: it.validade === v ? (v === "valido" ? COLORS.green : COLORS.red) : COLORS.steel,
-                            border: `1px solid ${it.validade === v ? (v === "valido" ? COLORS.green : COLORS.red) + "55" : COLORS.border}`,
-                          }}>
-                          {v === "valido" ? "Válido" : "Inválido"}
-                        </button>
-                      ))}
-                      <input value={it.obs} onChange={(e) => patchDoc(ci, ii, { obs: e.target.value })} placeholder="Observação sobre o documento..."
-                        style={{ flex: 1, minWidth: 160, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "5px 9px", color: COLORS.ice, fontSize: 11.5 }} />
-                    </div>
-                  )}
-                </div>
-              )}
+      <div style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14, marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, marginBottom: 10 }}>Adicionar documento</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 0.7fr", gap: 8, marginBottom: 8 }}>
+          <input placeholder="Nome do documento" value={novo.nome} onChange={(e) => setNovo((n) => ({ ...n, nome: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
+          <input placeholder="Descrição" value={novo.descricao} onChange={(e) => setNovo((n) => ({ ...n, descricao: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
+          <select value={novo.status} onChange={(e) => setNovo((n) => ({ ...n, status: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }}>
+            {STATUS_DOC_OPCOES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "0.6fr 1fr auto", gap: 8 }}>
+          <input type="date" value={novo.validade} onChange={(e) => setNovo((n) => ({ ...n, validade: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
+          <input placeholder="Observação" value={novo.observacao} onChange={(e) => setNovo((n) => ({ ...n, observacao: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
+          <button onClick={adicionar} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 6, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+            <Plus size={13} /> Adicionar
+          </button>
+        </div>
+      </div>
+
+      {itens.length === 0 && <div style={{ padding: 20, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum documento registrado ainda.</div>}
+      {itens.map((it) => (
+        <div key={it.id} style={{ padding: "10px 0", borderBottom: `1px solid ${COLORS.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, color: COLORS.ice, fontWeight: 600 }}>{it.nome}</div>
+              {it.descricao && <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{it.descricao}</div>}
+              <div style={{ display: "flex", gap: 12, marginTop: 5, fontSize: 11, color: COLORS.steel }}>
+                {it.validade && <span>Validade: <b style={{ color: new Date(it.validade) < hoje ? COLORS.red : COLORS.steelLight }}>{fmtDate(it.validade)}</b></span>}
+                {it.observacao && <span>{it.observacao}</span>}
+              </div>
             </div>
-          ))}
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+              <select value={it.status} onChange={(e) => patchItem(it.id, { status: e.target.value })}
+                style={{ background: `${corStatusDoc(it.status)}22`, color: corStatusDoc(it.status), border: `1px solid ${corStatusDoc(it.status)}55`, borderRadius: 999, padding: "4px 9px", fontSize: 11, fontWeight: 700 }}>
+                {STATUS_DOC_OPCOES.map((s) => <option key={s} value={s} style={{ background: COLORS.panel, color: COLORS.ice }}>{s}</option>)}
+              </select>
+              <button onClick={() => remover(it.id)} title="Remover documento" style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${COLORS.red}55`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <Trash2 size={12} color={COLORS.red} />
+              </button>
+            </div>
+          </div>
         </div>
       ))}
 
@@ -1083,12 +1061,12 @@ function RelatorioTab({ processo }) {
 
   const exportarCSV = () => {
     const rows = [["Categoria", "Item", "Status", "Detalhe"]];
-    processo.documentos.categorias.forEach((c) => c.itens.filter((i) => i.aplicavel).forEach((it) => {
-      rows.push(["Documento", `${c.titulo} — ${it.texto}`, it.estado === "anexado" ? "Anexado" : it.estado === "nao_aplica" ? "Não se aplica" : "Pendente", it.arquivo ? it.arquivo.nome : ""]);
-    }));
-    processo.checklist.secoes.forEach((s) => s.itens.forEach((it) => {
-      rows.push(["Checklist técnico", `${s.titulo} — ${it.texto}`, it.estado === "conforme" ? "Conforme" : it.estado === "nao_conforme" ? "Não conforme" : it.estado === "na" ? "Não se aplica" : "Pendente", it.obs || ""]);
-    }));
+    (processo.documentos.itens || []).forEach((it) => {
+      rows.push(["Documento", it.nome, it.status, [it.descricao, it.validade ? `Validade: ${fmtDate(it.validade)}` : "", it.observacao].filter(Boolean).join(" · ")]);
+    });
+    (processo.checklist.itens || []).forEach((it) => {
+      rows.push(["Checklist", it.item, it.status, ""]);
+    });
     downloadCSV(`relatorio_${processo.cliente}_${processo.numero}.csv`.replace(/[^\w.-]+/g, "_"), rows);
   };
 
@@ -1132,12 +1110,15 @@ function RelatorioTab({ processo }) {
    ATUALIZAÇÕES TAB (por processo)
    ============================================================ */
 function AtualizacoesTab({ processo, onUpdate }) {
-  const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), tipo: ATUALIZACAO_TIPOS[0], descricao: "", responsavel: "Primers" });
+  const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), tipo: ATUALIZACAO_TIPOS[0], descricao: "", responsavel: "Primers", incluirRelatorio: true });
   const add = () => {
     if (!form.descricao) return;
     const nova = { id: Date.now(), ...form };
     onUpdate({ ...processo, atualizacoes: [nova, ...processo.atualizacoes], ultimaAtualizacao: form.data });
     setForm((f) => ({ ...f, descricao: "" }));
+  };
+  const toggleRelatorio = (id) => {
+    onUpdate({ ...processo, atualizacoes: processo.atualizacoes.map((a) => (a.id === id ? { ...a, incluirRelatorio: a.incluirRelatorio === false ? true : false } : a)) });
   };
   return (
     <div>
@@ -1162,9 +1143,15 @@ function AtualizacoesTab({ processo, onUpdate }) {
         </div>
         <textarea value={form.descricao} onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="Descreva o que aconteceu..." rows={2}
           style={{ width: "100%", background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px", color: COLORS.ice, fontSize: 12.5, resize: "vertical", fontFamily: "'Inter', sans-serif", marginBottom: 10 }} />
-        <button onClick={add} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
-          <MessageSquarePlus size={14} /> Adicionar
-        </button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input type="checkbox" checked={form.incluirRelatorio} onChange={(e) => setForm((f) => ({ ...f, incluirRelatorio: e.target.checked }))} />
+            <span style={{ fontSize: 12, color: COLORS.steelLight }}>Incluir no Relatório de Status</span>
+          </label>
+          <button onClick={add} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
+            <MessageSquarePlus size={14} /> Adicionar
+          </button>
+        </div>
       </div>
 
       {processo.atualizacoes.length === 0 && <div style={{ fontSize: 12.5, color: COLORS.steel, textAlign: "center", padding: 20 }}>Nenhuma atualização registrada ainda.</div>}
@@ -1178,6 +1165,10 @@ function AtualizacoesTab({ processo, onUpdate }) {
             </div>
             <div style={{ fontSize: 12.5, color: COLORS.ice, lineHeight: 1.5 }}>{a.descricao}</div>
           </div>
+          <label title="Marcar para aparecer no Relatório de Status" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, cursor: "pointer", alignSelf: "flex-start" }}>
+            <input type="checkbox" checked={a.incluirRelatorio !== false} onChange={() => toggleRelatorio(a.id)} />
+            <span style={{ fontSize: 10, color: COLORS.steel, whiteSpace: "nowrap" }}>Relatório</span>
+          </label>
         </div>
       ))}
     </div>
@@ -1402,7 +1393,7 @@ function abrirEImprimir(html) {
 
 function gerarStatusServicoHTML(processo) {
   const status = STATUS_CONFIG[processo.statusAtual];
-  const atualizacoes = [...processo.atualizacoes].sort((a, b) => b.data.localeCompare(a.data));
+  const atualizacoes = processo.atualizacoes.filter((a) => a.incluirRelatorio !== false).sort((a, b) => b.data.localeCompare(a.data));
   const linhas = atualizacoes.map((a) => `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo}</td><td>${a.responsavel}</td><td>${a.descricao}</td></tr>`).join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço — ${processo.assunto}</title><style>${PRINT_BRAND_CSS}</style></head><body>
   ${brandHeader("Status de Serviço", `${processo.cliente} — ${processo.unidade} · Gerado em ${fmtDate(hojeISOStr())}`)}
@@ -1442,7 +1433,7 @@ function imprimirLinhaDoTempo(processo) { abrirEImprimir(gerarLinhaDoTempoHTML(p
 function gerarStatusServicoGeralHTML(processos, tituloCliente) {
   const linhas = processos.map((p) => {
     const st = STATUS_CONFIG[p.statusAtual];
-    const ultima = [...p.atualizacoes].sort((a, b) => b.data.localeCompare(a.data))[0];
+    const ultima = [...p.atualizacoes].filter((a) => a.incluirRelatorio !== false).sort((a, b) => b.data.localeCompare(a.data))[0];
     return `<tr><td>${p.cliente}</td><td>${p.unidade}</td><td>${p.assunto}</td><td>${p.tipo}</td>
       <td><span class="badge" style="background:${st.bg};color:${st.fg}">${st.label}</span></td>
       <td>${fmtDate(p.ultimaAtualizacao)}</td><td>${ultima ? ultima.descricao : "—"}</td></tr>`;
@@ -1528,7 +1519,6 @@ function DetailModal({ processo, processos, onClose, onUpdate, onOpenProcesso, o
               {[
                 ["geral", "Visão geral", Building2],
                 ["documentos", "Documentos", FileStack],
-                ["urbanistico", "Parâmetros urbanísticos", Building2],
                 ["checklist", "Checklist", ClipboardCheck],
                 ["linhadotempo", "Linha do tempo", Timer],
                 ["atualizacoes", `Status de Serviço (${processo.atualizacoes.length})`, History],
@@ -1585,18 +1575,34 @@ function DetailModal({ processo, processos, onClose, onUpdate, onOpenProcesso, o
               <Row label="Cidade / UF" value={`${processo.cidade} - ${processo.uf}`} />
               <Row label="Tipo de serviço" value={processo.tipo} />
               <Row label="Técnico" value={processo.tecnico} />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-                <span style={{ fontSize: 12, color: COLORS.steel }}>Nº do processo</span>
-                <input value={processo.numero === "-" ? "" : processo.numero} onChange={(e) => patch({ numero: e.target.value || "-" })} placeholder="Preencher quando obtido"
-                  style={{ background: "transparent", border: "none", borderBottom: `1px dashed ${COLORS.border}`, color: COLORS.ice, fontSize: 13, textAlign: "right", padding: "2px 0" }} />
-              </div>
-              <Row label="Data de início" value={fmtDate(processo.dataInicio)} />
-              <Row label="Data de protocolo" value={fmtDate(processo.dataProtocolo)} />
-              <Row label="Previsão de análise do órgão" value={fmtDate(processo.dataPrevisaoOrgao)} />
-              <Row label="Exigência recebida" value={fmtDate(processo.dataExigenciaRecebida)} />
-              <Row label="Prazo limite para atendimento" value={fmtDate(processo.dataExigenciaPrazoLimite)} />
-              <Row label="Exigência atendida" value={fmtDate(processo.dataAtendimentoExigencia)} />
-              <Row label="Data de conclusão" value={fmtDate(processo.dataConclusao)} />
+
+              {processo.tipo === "Serviço Técnico" ? (
+                <>
+                  <Row label="Data de início" value={fmtDate(processo.dataInicio)} />
+                  <Row label="Data prevista de vistoria" value={fmtDate(processo.dataPrevistaVistoria)} />
+                  <Row label="Previsão de conclusão / entrega" value={fmtDate(processo.dataPrevisaoOrgao)} />
+                  <Row label="Data de conclusão" value={fmtDate(processo.dataConclusao)} />
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
+                    <span style={{ fontSize: 12, color: COLORS.steel }}>Nº do processo</span>
+                    <input value={processo.numero === "-" ? "" : processo.numero} onChange={(e) => patch({ numero: e.target.value || "-" })} placeholder="Preencher quando obtido"
+                      style={{ background: "transparent", border: "none", borderBottom: `1px dashed ${COLORS.border}`, color: COLORS.ice, fontSize: 13, textAlign: "right", padding: "2px 0" }} />
+                  </div>
+                  <Row label="Data de início" value={fmtDate(processo.dataInicio)} />
+                  <Row label="Previsão de análise/checklist" value={fmtDate(processo.dataPrevisaoAnaliseChecklist)} />
+                  <Row label="Data prevista de protocolo" value={fmtDate(processo.dataPrevistaProtocolo)} />
+                  <Row label="Data de protocolo" value={fmtDate(processo.dataProtocolo)} />
+                  <Row label="Previsão de análise do órgão" value={fmtDate(processo.dataPrevisaoOrgao)} />
+                  <Row label="Exigência recebida" value={fmtDate(processo.dataExigenciaRecebida)} />
+                  <Row label="Prazo limite para atendimento" value={fmtDate(processo.dataExigenciaPrazoLimite)} />
+                  <Row label="Atendimento técnico" value={fmtDate(processo.dataAtendimentoTecnico)} />
+                  <Row label="Exigência atendida" value={fmtDate(processo.dataAtendimentoExigencia)} />
+                  <Row label="Data de conclusão" value={fmtDate(processo.dataConclusao)} />
+                </>
+              )}
+
               <Row label="Prestador" value={processo.prestador || "—"} />
               <Row label="Site do órgão" value={processo.site || "—"} />
               <Row label="Login" value={processo.login || "—"} />
@@ -1653,7 +1659,6 @@ function DetailModal({ processo, processos, onClose, onUpdate, onOpenProcesso, o
             </div>
           )}
           {iniciado && tab === "documentos" && <DocumentosTab processo={processo} onUpdate={onUpdate} />}
-          {iniciado && tab === "urbanistico" && <ParametrosUrbanisticosTab processo={processo} onUpdate={onUpdate} />}
           {iniciado && tab === "checklist" && <ChecklistTab processo={processo} onUpdate={onUpdate} />}
           {iniciado && tab === "linhadotempo" && <LinhaDoTempoTab processo={processo} />}
           {iniciado && tab === "atualizacoes" && <AtualizacoesTab processo={processo} onUpdate={onUpdate} />}
@@ -1777,15 +1782,16 @@ function compromissosDoProcesso(p) {
 function AgendaSemanal({ processos, agendaItens, onOpenProcesso, onAddItem, onRemoveItem }) {
   const [showModal, setShowModal] = useState(null); // data (iso) do dia clicado, ou null
   const [tecnicoAtivo, setTecnicoAtivo] = useState("Todos");
-  const hojeRef = new Date();
-  const diaSemana = hojeRef.getDay();
-  const diffSegunda = diaSemana === 0 ? -6 : 1 - diaSemana;
-  const segunda = new Date(hojeRef);
-  segunda.setDate(hojeRef.getDate() + diffSegunda);
-  segunda.setHours(0, 0, 0, 0);
+  const [modoView, setModoView] = useState("semana"); // dia | semana | mes
+  const [dataRef, setDataRef] = useState(new Date());
+
   const nomesDia = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-  const isoDia = (d) => d.toISOString().slice(0, 10);
+  const nomesMes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const isoDia = (d) => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt.toISOString().slice(0, 10); };
+  const hojeRef = new Date();
   const hojeIso = isoDia(hojeRef);
+  const diaDaSemanaIndex = (d) => { const x = d.getDay(); return x === 0 ? 6 : x - 1; }; // Seg=0..Dom=6
+  const inicioSemana = (d) => { const dt = new Date(d); dt.setDate(dt.getDate() - diaDaSemanaIndex(dt)); dt.setHours(0, 0, 0, 0); return dt; };
 
   const processosFiltrados = tecnicoAtivo === "Todos" ? processos : processos.filter((p) => p.tecnico === tecnicoAtivo);
   const itensFiltrados = tecnicoAtivo === "Todos" ? agendaItens : agendaItens.filter((a) => !a.tecnico || a.tecnico === tecnicoAtivo);
@@ -1798,22 +1804,58 @@ function AgendaSemanal({ processos, agendaItens, onOpenProcesso, onAddItem, onRe
     });
   });
 
-  const dias = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(segunda);
-    d.setDate(segunda.getDate() + i);
+  let diasExibir = [];
+  let tituloPeriodo = "";
+  if (modoView === "dia") {
+    diasExibir = [new Date(dataRef)];
+    tituloPeriodo = `${nomesDia[diaDaSemanaIndex(dataRef)]}, ${String(dataRef.getDate()).padStart(2, "0")}/${String(dataRef.getMonth() + 1).padStart(2, "0")}/${dataRef.getFullYear()}`;
+  } else if (modoView === "semana") {
+    const seg = inicioSemana(dataRef);
+    diasExibir = Array.from({ length: 7 }, (_, i) => { const d = new Date(seg); d.setDate(seg.getDate() + i); return d; });
+    const fim = diasExibir[6];
+    tituloPeriodo = `${String(diasExibir[0].getDate()).padStart(2, "0")}/${String(diasExibir[0].getMonth() + 1).padStart(2, "0")} – ${String(fim.getDate()).padStart(2, "0")}/${String(fim.getMonth() + 1).padStart(2, "0")}/${fim.getFullYear()}`;
+  } else {
+    const primeiroDiaMes = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1);
+    const ultimoDiaMes = new Date(dataRef.getFullYear(), dataRef.getMonth() + 1, 0);
+    const inicioGrade = inicioSemana(primeiroDiaMes);
+    const fimGrade = new Date(ultimoDiaMes);
+    fimGrade.setDate(ultimoDiaMes.getDate() + (6 - diaDaSemanaIndex(ultimoDiaMes)));
+    const totalDias = Math.round((fimGrade - inicioGrade) / 86400000) + 1;
+    diasExibir = Array.from({ length: totalDias }, (_, i) => { const d = new Date(inicioGrade); d.setDate(inicioGrade.getDate() + i); return d; });
+    tituloPeriodo = `${nomesMes[dataRef.getMonth()]} de ${dataRef.getFullYear()}`;
+  }
+
+  const navegar = (direcao) => {
+    const nova = new Date(dataRef);
+    if (modoView === "dia") nova.setDate(nova.getDate() + direcao);
+    else if (modoView === "semana") nova.setDate(nova.getDate() + direcao * 7);
+    else nova.setMonth(nova.getMonth() + direcao);
+    setDataRef(nova);
+  };
+
+  const dias = diasExibir.map((d) => {
     const iso = isoDia(d);
     return {
-      label: nomesDia[i], data: d, iso,
+      data: d, iso, dentroDoMes: modoView !== "mes" || d.getMonth() === dataRef.getMonth(),
       processosDia: compromissosPorDia[iso] || [],
       itensDia: itensFiltrados.filter((a) => a.data === iso),
     };
   });
 
+  const alturaCelula = modoView === "mes" ? 82 : 140;
+  const colunas = modoView === "dia" ? "1fr" : "repeat(7, minmax(100px, 1fr))";
+
+  const botaoNav = (onClick, children, title) => (
+    <button onClick={onClick} title={title} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+      {children}
+    </button>
+  );
+
   return (
     <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18, marginBottom: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
         <div style={{ fontSize: 12, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
-          <Clock size={13} /> Agenda da semana — prazos e itens cadastrados
+          <Clock size={13} /> Agenda — {tituloPeriodo}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 4 }}>
@@ -1829,48 +1871,80 @@ function AgendaSemanal({ processos, agendaItens, onOpenProcesso, onAddItem, onRe
           </button>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(120px, 1fr))", gap: 10, overflowX: "auto" }}>
-        {dias.map(({ label, data, iso, processosDia, itensDia }) => (
-          <div key={iso} style={{
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["dia", "Dia"], ["semana", "Semana"], ["mes", "Mês"]].map(([id, label]) => (
+            <button key={id} onClick={() => setModoView(id)} style={{
+              background: modoView === id ? COLORS.redDim : "transparent", color: modoView === id ? COLORS.red : COLORS.steelLight,
+              border: `1px solid ${modoView === id ? COLORS.red + "55" : COLORS.border}`, borderRadius: 6, padding: "5px 14px", fontSize: 11.5, fontWeight: modoView === id ? 700 : 500, cursor: "pointer",
+            }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {botaoNav(() => navegar(-1), <ChevronLeft size={14} color={COLORS.steelLight} />, "Período anterior")}
+          <button onClick={() => setDataRef(new Date())} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 11.5, color: COLORS.steelLight, cursor: "pointer" }}>Hoje</button>
+          {botaoNav(() => navegar(1), <ChevronRight size={14} color={COLORS.steelLight} />, "Próximo período")}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: colunas, gap: 8, overflowX: "auto" }}>
+        {dias.map(({ data, iso, dentroDoMes, processosDia, itensDia }) => (
+          <div key={iso} onClick={modoView === "mes" ? () => { setDataRef(new Date(data)); setModoView("dia"); } : undefined} style={{
             background: iso === hojeIso ? COLORS.redDim : COLORS.panelAlt,
-            border: `1px solid ${iso === hojeIso ? COLORS.red + "55" : COLORS.border}`, borderRadius: 8, padding: 10, minHeight: 140, display: "flex", flexDirection: "column",
+            border: `1px solid ${iso === hojeIso ? COLORS.red + "55" : COLORS.border}`, borderRadius: 8, padding: modoView === "mes" ? 7 : 10,
+            minHeight: alturaCelula, display: "flex", flexDirection: "column", opacity: dentroDoMes ? 1 : 0.4,
+            cursor: modoView === "mes" ? "pointer" : "default",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
-                <div style={{ fontSize: 10.5, color: iso === hojeIso ? COLORS.red : COLORS.steel, textTransform: "uppercase", fontWeight: 700, marginBottom: 2 }}>{label}</div>
-                <div style={{ fontSize: 15, color: COLORS.ice, fontFamily: "'Oswald', sans-serif", fontWeight: 600, marginBottom: 6 }}>
-                  {String(data.getDate()).padStart(2, "0")}/{String(data.getMonth() + 1).padStart(2, "0")}
+                {modoView !== "mes" && <div style={{ fontSize: 10.5, color: iso === hojeIso ? COLORS.red : COLORS.steel, textTransform: "uppercase", fontWeight: 700, marginBottom: 2 }}>{nomesDia[diaDaSemanaIndex(data)]}</div>}
+                <div style={{ fontSize: modoView === "mes" ? 12 : 15, color: COLORS.ice, fontFamily: "'Oswald', sans-serif", fontWeight: 600, marginBottom: modoView === "mes" ? 2 : 6 }}>
+                  {String(data.getDate()).padStart(2, "0")}{modoView !== "mes" ? `/${String(data.getMonth() + 1).padStart(2, "0")}` : ""}
                 </div>
               </div>
-              <button onClick={() => setShowModal(iso)} title="Adicionar item neste dia"
-                style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 5, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-                <Plus size={11} color={COLORS.steel} />
-              </button>
+              {modoView !== "mes" && (
+                <button onClick={(e) => { e.stopPropagation(); setShowModal(iso); }} title="Adicionar item neste dia"
+                  style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 5, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                  <Plus size={11} color={COLORS.steel} />
+                </button>
+              )}
             </div>
 
-            {processosDia.slice(0, 2).map((c, ci) => (
-              <div key={ci} onClick={() => onOpenProcesso(c.processo)} style={{ fontSize: 10.5, color: COLORS.steelLight, marginBottom: 5, cursor: "pointer", lineHeight: 1.4 }}>
-                <div style={{ fontWeight: 600, color: COLORS.ice }}>{c.processo.cliente}</div>
-                <div>{c.processo.assunto}</div>
-                <div style={{ fontSize: 9.5, color: COLORS.steel }}>{c.label}</div>
-              </div>
-            ))}
-            {processosDia.length > 2 && <div style={{ fontSize: 10, color: COLORS.steel, marginBottom: 4 }}>+{processosDia.length - 2} processo(s)</div>}
-
-            {itensDia.map((a) => (
-              <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 5, marginBottom: 5 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: AGENDA_TIPO_COLOR[a.tipo] || COLORS.steelLight, marginTop: 4, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 10.5, color: COLORS.ice, fontWeight: 600, lineHeight: 1.3 }}>{a.titulo}</div>
-                  <div style={{ fontSize: 9.5, color: COLORS.steel }}>{a.tipo}{a.tecnico ? ` · ${a.tecnico}` : ""}{a.descricao ? ` · ${a.descricao}` : ""}</div>
+            {modoView === "mes" ? (
+              (processosDia.length + itensDia.length) > 0 && (
+                <div style={{ fontSize: 9.5, color: COLORS.steelLight, marginTop: 2, lineHeight: 1.5 }}>
+                  {processosDia.length > 0 && <div>{processosDia.length} prazo(s)</div>}
+                  {itensDia.length > 0 && <div>{itensDia.length} item(ns)</div>}
                 </div>
-                <button onClick={() => onRemoveItem(a.id)} title="Remover" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
-                  <X size={10} color={COLORS.steel} />
-                </button>
-              </div>
-            ))}
+              )
+            ) : (
+              <>
+                {processosDia.slice(0, modoView === "dia" ? 8 : 2).map((c, ci) => (
+                  <div key={ci} onClick={() => onOpenProcesso(c.processo)} style={{ fontSize: 10.5, color: COLORS.steelLight, marginBottom: 5, cursor: "pointer", lineHeight: 1.4 }}>
+                    <div style={{ fontWeight: 600, color: COLORS.ice }}>{c.processo.cliente}</div>
+                    <div>{c.processo.assunto}</div>
+                    <div style={{ fontSize: 9.5, color: COLORS.steel }}>{c.label}</div>
+                  </div>
+                ))}
+                {modoView !== "dia" && processosDia.length > 2 && <div style={{ fontSize: 10, color: COLORS.steel, marginBottom: 4 }}>+{processosDia.length - 2} processo(s)</div>}
 
-            {processosDia.length === 0 && itensDia.length === 0 && <div style={{ fontSize: 10.5, color: COLORS.steel }}>—</div>}
+                {itensDia.map((a) => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 5, marginBottom: 5 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: AGENDA_TIPO_COLOR[a.tipo] || COLORS.steelLight, marginTop: 4, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10.5, color: COLORS.ice, fontWeight: 600, lineHeight: 1.3 }}>{a.titulo}</div>
+                      <div style={{ fontSize: 9.5, color: COLORS.steel }}>{a.tipo}{a.tecnico ? ` · ${a.tecnico}` : ""}{a.descricao ? ` · ${a.descricao}` : ""}</div>
+                    </div>
+                    <button onClick={() => onRemoveItem(a.id)} title="Remover" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
+                      <X size={10} color={COLORS.steel} />
+                    </button>
+                  </div>
+                ))}
+
+                {processosDia.length === 0 && itensDia.length === 0 && <div style={{ fontSize: 10.5, color: COLORS.steel }}>—</div>}
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -1879,58 +1953,61 @@ function AgendaSemanal({ processos, agendaItens, onOpenProcesso, onAddItem, onRe
   );
 }
 
+
 function AtualizacoesPage({ processos, onOpenProcesso }) {
-  const [filtroCliente, setFiltroCliente] = useState("Todos");
-  const [filtroTipo, setFiltroTipo] = useState("Todos");
-  const [filtroTecnico, setFiltroTecnico] = useState("Todos");
-  const [exportCliente, setExportCliente] = useState("Todos");
+  const [filtroCliente, setFiltroCliente] = useState([]);
+  const [filtroTecnico, setFiltroTecnico] = useState([]);
+  const [filtroTipo, setFiltroTipo] = useState([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const clientes = useMemo(() => ["Todos", ...Array.from(new Set(processos.map((p) => p.cliente))).sort()], [processos]);
+  const clientes = useMemo(() => Array.from(new Set(processos.map((p) => p.cliente))).sort(), [processos]);
+
+  const processosFiltrados = useMemo(() => processos.filter((p) => {
+    if (filtroCliente.length && !filtroCliente.includes(p.cliente)) return false;
+    if (filtroTecnico.length && !filtroTecnico.includes(p.tecnico)) return false;
+    return true;
+  }), [processos, filtroCliente, filtroTecnico]);
 
   const feed = useMemo(() => {
     const items = [];
-    processos.forEach((p) => {
-      if (filtroCliente !== "Todos" && p.cliente !== filtroCliente) return;
-      if (filtroTecnico !== "Todos" && p.tecnico !== filtroTecnico) return;
+    processosFiltrados.forEach((p) => {
       p.atualizacoes.forEach((a) => {
-        if (filtroTipo !== "Todos" && a.tipo !== filtroTipo) return;
+        if (a.incluirRelatorio === false) return;
+        if (filtroTipo.length && !filtroTipo.includes(a.tipo)) return;
         items.push({ ...a, processo: p });
       });
     });
     return items.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [processos, filtroCliente, filtroTipo, filtroTecnico]);
+  }, [processosFiltrados, filtroTipo]);
   const paginado = useMemo(() => paginate(feed, page, pageSize), [feed, page, pageSize]);
 
-  const exportar = () => {
-    const alvo = exportCliente === "Todos" ? processos : processos.filter((p) => p.cliente === exportCliente);
+  const exportarCSV = () => {
     const rows = [["Cliente", "Unidade", "Assunto", "Status atual", "Responsável", "Data protocolo", "Previsão órgão", "Última atualização", "Última mensagem"]];
-    alvo.forEach((p) => {
+    processosFiltrados.forEach((p) => {
       const ultima = p.atualizacoes[0];
       rows.push([
         p.cliente, p.unidade, p.assunto, STATUS_CONFIG[p.statusAtual].label, STATUS_CONFIG[p.statusAtual].responsavel,
         fmtDate(p.dataProtocolo), fmtDate(p.dataPrevisaoOrgao), fmtDate(p.ultimaAtualizacao), ultima ? ultima.descricao : "",
       ]);
     });
-    downloadCSV(`situacao_processos_${exportCliente === "Todos" ? "geral" : exportCliente}.csv`, rows);
+    downloadCSV("situacao_processos.csv", rows);
   };
 
   return (
     <div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18, justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Select value={filtroCliente} onChange={(v) => { setFiltroCliente(v); setPage(1); }} options={clientes.filter((c) => c !== "Todos")} placeholder="Todos os clientes" />
-          <Select value={filtroTecnico} onChange={(v) => { setFiltroTecnico(v); setPage(1); }} options={TECNICOS_OPTIONS} placeholder="Todos os técnicos" />
-          <Select value={filtroTipo} onChange={(v) => { setFiltroTipo(v); setPage(1); }} options={ATUALIZACAO_TIPOS} placeholder="Todos os tipos" />
+          <MultiSelectDropdown label="Clientes" options={clientes} selected={filtroCliente} onApply={(v) => { setFiltroCliente(v); setPage(1); }} />
+          <MultiSelectDropdown label="Técnicos" options={TECNICOS_OPTIONS} selected={filtroTecnico} onApply={(v) => { setFiltroTecnico(v); setPage(1); }} />
+          <MultiSelectDropdown label="Tipos de atualização" options={ATUALIZACAO_TIPOS} selected={filtroTipo} onApply={(v) => { setFiltroTipo(v); setPage(1); }} width={190} />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Select value={exportCliente} onChange={setExportCliente} options={clientes.filter((c) => c !== "Todos")} placeholder="Exportar: todos os clientes" />
-          <button onClick={() => imprimirStatusServicoGeral(exportCliente === "Todos" ? processos : processos.filter((p) => p.cliente === exportCliente), exportCliente === "Todos" ? null : exportCliente)}
+          <button onClick={() => imprimirStatusServicoGeral(processosFiltrados, filtroCliente.length === 1 ? filtroCliente[0] : null)}
             style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
             <Download size={13} /> Exportar para o cliente
           </button>
-          <button onClick={exportar} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "8px 14px", fontSize: 12.5, cursor: "pointer" }}>
+          <button onClick={exportarCSV} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "8px 14px", fontSize: 12.5, cursor: "pointer" }}>
             <Download size={13} /> CSV
           </button>
         </div>
@@ -3870,7 +3947,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
           )}
           {[
             { id: "processos", label: "Controle de Processos", icon: ListChecks },
-            { id: "atualizacoes", label: "Status de Serviço", icon: History },
+            { id: "atualizacoes", label: "Relatório de Status", icon: History },
             ...(isAdmin ? [{ id: "acessos", label: "Gerenciar acessos", icon: Users }] : []),
           ].map((item) => (
             <div key={item.id} className="nav-item" onClick={() => setTab(item.id)} style={{
@@ -3904,7 +3981,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
               {tab === "contratos" && "Contratos"}
               {tab === "importar-contratos" && "Importar novos clientes/contratos"}
               {tab === "processos" && "Controle de Processos"}
-              {tab === "atualizacoes" && "Status de Serviço"}
+              {tab === "atualizacoes" && "Relatório de Status"}
               {tab === "acessos" && "Gerenciar acessos"}
             </h1>
             <p style={{ fontSize: 12.5, color: COLORS.steel, marginTop: 2 }}>
@@ -3916,7 +3993,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
               {tab === "contratos" && `${contratos.length} linha(s) de contrato importada(s)`}
               {tab === "importar-contratos" && "Envie a planilha para atualizar clientes, unidades e contratos"}
               {tab === "processos" && `${buscados.length} de ${processos.length} processo(s)`}
-              {tab === "atualizacoes" && "Situação de cada serviço, com base no que foi registrado em Controle de Processos"}
+              {tab === "atualizacoes" && "Atualizações marcadas para aparecer no relatório, registradas em Controle de Processos"}
               {tab === "acessos" && "Criar ou remover logins de administradores e operacionais"}
             </p>
           </div>
