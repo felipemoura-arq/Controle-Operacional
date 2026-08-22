@@ -2908,102 +2908,152 @@ function UnidadeContratosModal({ cliente, unidade, contratos, onClose, onBack, o
   );
 }
 
-function ContratoDetalheCompletoModal({ proposta, cliente, unidade, contratos, processos, onUpdateContrato, onDeleteContrato, onAddContrato, isAdmin, clientesExistentes, onClose, onBack }) {
-  const [showAdicionar, setShowAdicionar] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const servicos = contratos.filter((c) => c.proposta === proposta && c.cliente === cliente && c.unidade === unidade);
+function ContratoDetalheCompletoModal({ proposta, cliente, unidade, contratos, processos, onUpdateContrato, onDeleteContrato, onExcluirContratos, onAddContrato, isAdmin, clientesExistentes, onClose, onBack }) {
+  const [showAdicionarServico, setShowAdicionarServico] = useState(false);
+  const [servicoParaTarefa, setServicoParaTarefa] = useState(null); // grupo de serviço, ou null
+  const [expandido, setExpandido] = useState(null); // nome do serviço expandido, ou null
+  const [confirmDeleteServico, setConfirmDeleteServico] = useState(null); // grupo de serviço
+  const [confirmDeleteTarefa, setConfirmDeleteTarefa] = useState(null); // linha (contrato)
+
+  const linhas = contratos.filter((c) => c.proposta === proposta && c.cliente === cliente && c.unidade === unidade);
+
+  const servicosAgrupados = useMemo(() => {
+    const map = {};
+    linhas.forEach((l) => {
+      if (!map[l.servico]) map[l.servico] = { servico: l.servico, tecnico: l.tecnico, tipo: l.tipo, honorarios: l.honorarios, tarefas: [] };
+      map[l.servico].tarefas.push(l);
+    });
+    return Object.values(map);
+  }, [linhas]);
 
   const processoDoServico = (servico) => (processos || []).find((p) => p.numeroContrato === proposta && p.cliente === cliente && p.unidade === unidade && p.assunto === servico);
 
-  const valorContratado = useMemo(() => {
-    const seen = new Set(); let total = 0;
-    servicos.forEach((s) => { if (!seen.has(s.servico)) { seen.add(s.servico); total += s.honorarios || 0; } });
-    return total;
-  }, [servicos]);
-  const valorFaturado = servicos.filter((s) => s.statusParcela === "Faturado").reduce((sum, s) => sum + (s.valorFaturamento || 0), 0);
+  const valorContratado = servicosAgrupados.reduce((s, g) => s + (g.honorarios || 0), 0);
+  const valorFaturado = linhas.filter((l) => l.statusParcela === "Faturado").reduce((s, l) => s + (l.valorFaturamento || 0), 0);
+
+  const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg };
+  const tdStyle = { padding: "11px 12px", fontSize: 12.5, color: COLORS.steelLight, borderBottom: `1px solid ${COLORS.border}` };
+  const campoTarefa = { background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 5, padding: "6px 8px", fontSize: 11.5, color: COLORS.ice, width: "100%" };
+  const labelTarefa = { fontSize: 9.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.03em", display: "block", marginBottom: 4 };
 
   return (
-    <ModalShell title={`Contrato ${proposta}`} onClose={onClose} onBack={onBack} maxWidth={920}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+    <ModalShell title={`Contrato ${proposta}`} onClose={onClose} onBack={onBack} maxWidth={960}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>{cliente} · {unidade}</div>
-          <div style={{ fontSize: 12.5, color: COLORS.steelLight, marginTop: 3 }}>Valor contratado: <b style={{ color: COLORS.ice }}>{fmtBRL(valorContratado)}</b> · Faturado: <b style={{ color: COLORS.green }}>{fmtBRL(valorFaturado)}</b></div>
+          <div style={{ fontSize: 12.5, color: COLORS.steelLight, marginTop: 3 }}>Valor contratado: <b style={{ color: COLORS.ice }}>{isAdmin ? fmtBRL(valorContratado) : "••••••"}</b> · Faturado: <b style={{ color: COLORS.green }}>{isAdmin ? fmtBRL(valorFaturado) : "••••••"}</b></div>
         </div>
-        <button onClick={() => setShowAdicionar(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
+        <button onClick={() => setShowAdicionarServico(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
           <Plus size={13} /> Adicionar serviço
         </button>
       </div>
 
-      {servicos.map((s) => {
-        const sp = statusParcelaStyle(s.statusParcela);
-        const proc = processoDoServico(s.servico);
-        return (
-          <div key={s.id} style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 14, marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: COLORS.ice }}>{s.servico}</div>
-                <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{s.tarefa}</div>
-              </div>
-              <button onClick={() => setConfirmDelete(s)} title="Excluir este serviço"
-                style={{ background: "transparent", border: `1px solid ${COLORS.red}55`, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-                <Trash2 size={12} color={COLORS.red} />
-              </button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              <ModalField label="Tipo">
-                <select value={s.tipo || "Processo"} onChange={(e) => onUpdateContrato(s.id, { tipo: e.target.value })} style={modalInputStyle}>
-                  {CONTRATO_TIPO_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </ModalField>
-              <ModalField label="Técnico">
-                <CampoComConfirmacao tipo="select" valor={TECNICOS_OPTIONS.includes(s.tecnico) ? s.tecnico : ""} opcoes={["", ...TECNICOS_OPTIONS]}
-                  onConfirmar={(v) => onUpdateContrato(s.id, { tecnico: v })} largura="100%" />
-              </ModalField>
-              <ModalField label="Status da parcela">
-                <CampoComConfirmacao tipo="select" valor={s.statusParcela} opcoes={STATUS_PARCELA_OPTIONS}
-                  onConfirmar={(v) => onUpdateContrato(s.id, { statusParcela: v })} corTexto={sp.fg} largura="100%" />
-              </ModalField>
-              <ModalField label="Honorários (R$)">
-                {isAdmin ? <input type="number" value={s.honorarios} onChange={(e) => onUpdateContrato(s.id, { honorarios: parseFloat(e.target.value) || 0 })} style={modalInputStyle} />
-                  : <div style={{ fontSize: 13, color: COLORS.steel, padding: "8px 0" }}>••••••</div>}
-              </ModalField>
-              <ModalField label="Valor da parcela (R$)">
-                {isAdmin ? <input type="number" value={s.valorFaturamento} onChange={(e) => onUpdateContrato(s.id, { valorFaturamento: parseFloat(e.target.value) || 0 })} style={modalInputStyle} />
-                  : <div style={{ fontSize: 13, color: COLORS.steel, padding: "8px 0" }}>••••••</div>}
-              </ModalField>
-              <ModalField label="Data SLA">
-                <CampoComConfirmacao tipo="date" valor={s.dataSLA} onConfirmar={(v) => onUpdateContrato(s.id, { dataSLA: v })} largura="100%" />
-              </ModalField>
-            </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLORS.border}`, fontSize: 11.5, color: COLORS.steel }}>
-              <span>Início do serviço: <b style={{ color: COLORS.steelLight }}>{proc ? fmtDate(proc.dataInicio) : "—"}</b></span>
-              <span>Conclusão: <b style={{ color: COLORS.steelLight }}>{proc ? fmtDate(proc.dataConclusao) : "—"}</b></span>
-              <span style={{ marginLeft: "auto" }}>Status atual: {proc ? <Pill fg={STATUS_CONFIG[proc.statusAtual].fg} bg={STATUS_CONFIG[proc.statusAtual].bg}>{STATUS_CONFIG[proc.statusAtual].label}</Pill> : "—"}</span>
-            </div>
-          </div>
-        );
-      })}
-      {servicos.length === 0 && <div style={{ padding: 20, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum serviço neste contrato ainda.</div>}
+      <div style={{ overflowX: "auto", border: `1px solid ${COLORS.border}`, borderRadius: 8 }}>
+        <table>
+          <thead><tr>
+            <th style={thStyle}>Serviço</th><th style={thStyle}>Técnico</th><th style={thStyle}>Valor</th>
+            <th style={thStyle}>Faturamento</th><th style={thStyle}>Status atual</th><th style={thStyle}>Ações</th>
+          </tr></thead>
+          <tbody>
+            {servicosAgrupados.map((g) => {
+              const faturadas = g.tarefas.filter((t) => t.statusParcela === "Faturado").length;
+              const proc = processoDoServico(g.servico);
+              const stProc = proc ? STATUS_CONFIG[proc.statusAtual] : null;
+              const aberto = expandido === g.servico;
+              return (
+                <React.Fragment key={g.servico}>
+                  <tr className="row-hover" onClick={() => setExpandido(aberto ? null : g.servico)}
+                    style={{ cursor: "pointer", background: aberto ? COLORS.redDim : "transparent" }}>
+                    <td style={{ ...tdStyle, color: COLORS.ice, fontWeight: 600 }}>{g.servico}</td>
+                    <td style={tdStyle}>{g.tecnico && g.tecnico !== "-" ? g.tecnico : "—"}</td>
+                    <td style={tdStyle}>{isAdmin ? fmtBRL(g.honorarios) : "••••••"}</td>
+                    <td style={tdStyle}>
+                      <Pill fg={faturadas === g.tarefas.length ? COLORS.green : COLORS.orange} bg={faturadas === g.tarefas.length ? COLORS.greenDim : COLORS.orangeDim}>
+                        {faturadas}/{g.tarefas.length} parcelas
+                      </Pill>
+                    </td>
+                    <td style={tdStyle}>{stProc ? <Pill fg={stProc.fg} bg={stProc.bg}>{stProc.label}</Pill> : "—"}</td>
+                    <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setExpandido(aberto ? null : g.servico)} title="Ver tarefas"
+                          style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                          <Pencil size={12} color={COLORS.steelLight} />
+                        </button>
+                        <button onClick={() => setConfirmDeleteServico(g)} title="Excluir este serviço (todas as tarefas)"
+                          style={{ background: "transparent", border: `1px solid ${COLORS.red}55`, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                          <Trash2 size={12} color={COLORS.red} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {aberto && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: 0, borderBottom: `1px solid ${COLORS.border}` }}>
+                        <div style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.red}4d`, borderRadius: 8, padding: 16, margin: "0 10px 12px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.ice }}>Tarefas — {g.servico}</div>
+                            <div style={{ fontSize: 11, color: COLORS.green, fontWeight: 700 }}>Total: {Math.round(g.tarefas.reduce((s, t) => s + (t.porcentagem || 0), 0) * 100)}%</div>
+                          </div>
+                          {g.tarefas.map((t, i) => {
+                            const sp = statusParcelaStyle(t.statusParcela);
+                            return (
+                              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "0.4fr 1.3fr 1fr 0.7fr 1fr 1.2fr 1.3fr 0.4fr", gap: 8, alignItems: "end", marginBottom: 12 }}>
+                                <div><label style={labelTarefa}>Nº</label><input value={i + 1} readOnly style={{ ...campoTarefa, color: COLORS.steel }} /></div>
+                                <div><label style={labelTarefa}>Descrição</label><input value={t.tarefa} onChange={(e) => onUpdateContrato(t.id, { tarefa: e.target.value })} style={campoTarefa} /></div>
+                                <div><label style={labelTarefa}>Data SLA</label><CampoComConfirmacao tipo="date" valor={t.dataSLA} onConfirmar={(v) => onUpdateContrato(t.id, { dataSLA: v })} largura="100%" /></div>
+                                <div><label style={labelTarefa}>%</label><input type="number" value={Math.round((t.porcentagem || 0) * 100)} onChange={(e) => { const pct = parseFloat(e.target.value) || 0; onUpdateContrato(t.id, { porcentagem: pct / 100, valorFaturamento: Math.round((g.honorarios || 0) * pct) / 100 }); }} style={campoTarefa} /></div>
+                                <div><label style={labelTarefa}>Valor</label>{isAdmin ? <input type="number" value={t.valorFaturamento} onChange={(e) => onUpdateContrato(t.id, { valorFaturamento: parseFloat(e.target.value) || 0 })} style={campoTarefa} /> : <div style={{ ...campoTarefa, color: COLORS.steel }}>••••••</div>}</div>
+                                <div><label style={labelTarefa}>Status</label><CampoComConfirmacao tipo="select" valor={t.statusParcela} opcoes={STATUS_PARCELA_OPTIONS} onConfirmar={(v) => onUpdateContrato(t.id, { statusParcela: v })} corTexto={sp.fg} largura="100%" /></div>
+                                <div><label style={labelTarefa}>Observação</label><input value={t.observacao || ""} onChange={(e) => onUpdateContrato(t.id, { observacao: e.target.value })} placeholder="—" style={campoTarefa} /></div>
+                                <button onClick={() => setConfirmDeleteTarefa(t)} title="Excluir esta tarefa"
+                                  style={{ background: "transparent", border: `1px solid ${COLORS.red}55`, borderRadius: 5, height: 30, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                                  <Trash2 size={11} color={COLORS.red} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          <button onClick={() => setServicoParaTarefa(g)} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px dashed ${COLORS.border}`, color: COLORS.steel, borderRadius: 6, padding: "7px 12px", fontSize: 11.5, cursor: "pointer", marginTop: 4 }}>
+                            <Plus size={12} /> Adicionar tarefa/parcela
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            {servicosAgrupados.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum serviço neste contrato ainda.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ textAlign: "right", marginTop: 12, fontSize: 13, color: COLORS.steelLight }}>
+        Total do contrato: <b style={{ color: COLORS.ice, fontFamily: "'Oswald', sans-serif", fontSize: 16 }}>{isAdmin ? fmtBRL(valorContratado) : "••••••"}</b>
+      </div>
 
-      {showAdicionar && (
+      {showAdicionarServico && (
         <ContratoFormModal title={`Adicionar serviço — contrato ${proposta}`} submitLabel="Adicionar serviço" isAdmin={isAdmin}
           initial={{ proposta, cliente, unidade, tipo: "Processo", servico: "", tarefa: "", honorarios: "", valorFaturamento: "", porcentagemPct: "100", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "" }}
-          onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setShowAdicionar(false)} clientesExistentes={clientesExistentes} />
+          onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setShowAdicionarServico(false)} clientesExistentes={clientesExistentes} />
       )}
-      {confirmDelete && (
-        <ModalShell title="Confirmar exclusão" onClose={() => setConfirmDelete(null)} maxWidth={400}>
-          <p style={{ fontSize: 13, color: COLORS.steelLight, lineHeight: 1.6 }}>
-            Remover <b style={{ color: COLORS.ice }}>{confirmDelete.servico}</b> ({confirmDelete.tarefa}) do contrato {proposta}? Esta ação não pode ser desfeita.
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-            <button onClick={() => setConfirmDelete(null)} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-            <button onClick={() => { onDeleteContrato(confirmDelete.id); setConfirmDelete(null); }} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Excluir</button>
-          </div>
-        </ModalShell>
+      {servicoParaTarefa && (
+        <ContratoFormModal title={`Adicionar tarefa — ${servicoParaTarefa.servico}`} submitLabel="Adicionar tarefa" isAdmin={isAdmin}
+          initial={{ proposta, cliente, unidade, tipo: servicoParaTarefa.tipo || "Processo", servico: servicoParaTarefa.servico, tecnico: servicoParaTarefa.tecnico, tarefa: "", honorarios: String(servicoParaTarefa.honorarios || ""), valorFaturamento: "", porcentagemPct: "", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "" }}
+          onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setServicoParaTarefa(null)} clientesExistentes={clientesExistentes} />
+      )}
+      {confirmDeleteServico && (
+        <ConfirmarExclusaoModal titulo="Excluir serviço" onCancelar={() => setConfirmDeleteServico(null)}
+          mensagem={`Excluir o serviço "${confirmDeleteServico.servico}" e todas as suas ${confirmDeleteServico.tarefas.length} tarefa(s)/parcela(s)? Esta ação não pode ser desfeita.`}
+          onConfirmar={() => { onExcluirContratos(confirmDeleteServico.tarefas); setConfirmDeleteServico(null); if (expandido === confirmDeleteServico.servico) setExpandido(null); }} />
+      )}
+      {confirmDeleteTarefa && (
+        <ConfirmarExclusaoModal titulo="Excluir tarefa" onCancelar={() => setConfirmDeleteTarefa(null)}
+          mensagem={`Remover a tarefa "${confirmDeleteTarefa.tarefa}" (${confirmDeleteTarefa.servico})? Esta ação não pode ser desfeita.`}
+          onConfirmar={() => { onDeleteContrato(confirmDeleteTarefa.id); setConfirmDeleteTarefa(null); }} />
       )}
     </ModalShell>
   );
 }
+
 
 function ClientesPage({ contratos, onAddContrato, isAdmin, onOpenCliente, onExcluirClientes }) {
   const [busca, setBusca] = useState("");
@@ -3196,138 +3246,21 @@ function UnidadesPage({ contratos, onAddContrato, onOpenUnidade, isAdmin, onExcl
    PLANEJAMENTO MENSAL — visão do financeiro por mês/ano,
    conforme a Data SLA de cada parcela do contrato
    ============================================================ */
-function PlanejamentoMensalPage({ contratos }) {
-  const anosDisponiveis = useMemo(() => {
-    const anos = new Set(contratos.map((c) => (c.dataSLA ? c.dataSLA.slice(0, 4) : null)).filter(Boolean));
-    if (anos.size === 0) anos.add(String(new Date().getFullYear()));
-    return Array.from(anos).sort();
-  }, [contratos]);
-  const [ano, setAno] = useState(anosDisponiveis[anosDisponiveis.length - 1]);
-  const [mes, setMes] = useState("Todos");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  useEffect(() => { if (!anosDisponiveis.includes(ano)) setAno(anosDisponiveis[anosDisponiveis.length - 1]); }, [anosDisponiveis]); // eslint-disable-line
-
-
-  const doAno = useMemo(() => contratos.filter((c) => c.dataSLA && c.dataSLA.slice(0, 4) === ano), [contratos, ano]);
-  const filtrados = useMemo(() => {
-    if (mes === "Todos") return doAno;
-    return doAno.filter((c) => String(parseInt(c.dataSLA.slice(5, 7), 10)) === mes);
-  }, [doAno, mes]);
-
-  const totalPlanejado = filtrados.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const totalFaturado = filtrados.filter((c) => c.statusParcela === "Faturado").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const totalAndamento = filtrados.filter((c) => c.statusParcela === "Em andamento").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const totalConcluidoNaoFaturado = filtrados.filter((c) => c.statusParcela === "Concluído / Não faturado").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const totalSuspenso = filtrados.filter((c) => c.statusParcela === "Suspenso").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-
-  const chartData = useMemo(() => {
-    if (mes === "Todos") {
-      const map = {};
-      for (let m = 1; m <= 12; m++) map[m] = { label: MESES_ABREV[m - 1], "Concluído / Não faturado": 0, "Em andamento": 0, "Faturado": 0, "Suspenso": 0 };
-      doAno.forEach((c) => {
-        const m = parseInt(c.dataSLA.slice(5, 7), 10);
-        if (!map[m]) return;
-        map[m][c.statusParcela] = (map[m][c.statusParcela] || 0) + (c.valorFaturamento || 0);
-      });
-      return Object.values(map);
-    }
-    const map = {};
-    filtrados.forEach((c) => {
-      if (!map[c.cliente]) map[c.cliente] = { label: c.cliente, "Concluído / Não faturado": 0, "Em andamento": 0, "Faturado": 0, "Suspenso": 0 };
-      map[c.cliente][c.statusParcela] = (map[c.cliente][c.statusParcela] || 0) + (c.valorFaturamento || 0);
-    });
-    return Object.values(map).sort((a, b) => (b["Concluído / Não faturado"] + b["Em andamento"] + b["Faturado"] + b["Suspenso"]) - (a["Concluído / Não faturado"] + a["Em andamento"] + a["Faturado"] + a["Suspenso"])).slice(0, 10);
-  }, [mes, doAno, filtrados]);
-
-  const paginados = useMemo(() => {
-    const ordenados = [...filtrados].sort((a, b) => (a.dataSLA || "").localeCompare(b.dataSLA || ""));
-    return paginate(ordenados, page, pageSize);
-  }, [filtrados, page, pageSize]);
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, color: COLORS.steel, fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          <Filter size={13} /> Período
-        </div>
-        <Select value={ano} onChange={(v) => { setAno(v); setPage(1); }} options={anosDisponiveis} />
-        <select value={mes} onChange={(e) => { setMes(e.target.value); setPage(1); }} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "8px 10px", color: COLORS.steelLight, fontSize: 12.5, fontFamily: "'Inter', sans-serif" }}>
-          <option value="Todos">Ano inteiro</option>
-          {MESES_NOMES.map((nome, i) => <option key={nome} value={String(i + 1)}>{nome}</option>)}
-        </select>
-        {mes !== "Todos" && <span style={{ fontSize: 12.5, color: COLORS.steelLight }}>{MESES_NOMES[parseInt(mes, 10) - 1]} de {ano}</span>}
-      </div>
-
-      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-        <KpiCard icon={DollarSign} label="Total planejado" value={fmtBRL(totalPlanejado)} accent={COLORS.blue} sub={mes === "Todos" ? `ano ${ano}` : `${MESES_NOMES[parseInt(mes, 10) - 1]}/${ano}`} />
-        <KpiCard icon={CheckCircle2} label="Faturado" value={fmtBRL(totalFaturado)} accent={COLORS.green} sub="parcelas já faturadas" />
-        <KpiCard icon={Clock} label="Em andamento" value={fmtBRL(totalAndamento)} accent={COLORS.blue} sub="parcelas em execução" />
-        <KpiCard icon={AlertTriangle} label="Concluído / Não faturado" value={fmtBRL(totalConcluidoNaoFaturado)} accent={COLORS.orange} sub="pronto, falta faturar" />
-        <KpiCard icon={MinusCircle} label="Suspenso" value={fmtBRL(totalSuspenso)} accent={COLORS.steel} sub="parcelas suspensas" />
-      </div>
-
-      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18, marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: 14 }}>
-          {mes === "Todos" ? `Planejamento Financeiro — ano ${ano}` : `Planejamento Financeiro por cliente — ${MESES_NOMES[parseInt(mes, 10) - 1]}/${ano}`}
-        </div>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={chartData} margin={{ left: 0, right: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-            <XAxis dataKey="label" tick={{ fill: COLORS.steelLight, fontSize: 11 }} axisLine={{ stroke: COLORS.border }} tickLine={false} />
-            <YAxis tick={{ fill: COLORS.steel, fontSize: 10.5 }} axisLine={{ stroke: COLORS.border }} tickLine={false} />
-            <Tooltip formatter={(v) => fmtBRL(v)} contentStyle={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-            <Legend wrapperStyle={{ fontSize: 11, color: COLORS.steelLight }} />
-            <Bar dataKey="Concluído / Não faturado" stackId="a" fill={COLORS.orange} />
-            <Bar dataKey="Em andamento" stackId="a" fill={COLORS.blue} />
-            <Bar dataKey="Faturado" stackId="a" fill={COLORS.green} />
-            <Bar dataKey="Suspenso" stackId="a" fill={COLORS.steel} radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table>
-            <thead><tr>{["Data SLA", "Cliente / Unidade", "Serviço", "Tarefa", "Técnico", "Valor", "Status parcela"].map((h) => (
-              <th key={h} style={{ textAlign: "left", padding: "10px 16px", fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: `1px solid ${COLORS.border}`, whiteSpace: "nowrap" }}>{h}</th>
-            ))}</tr></thead>
-            <tbody>
-              {paginados.map((c) => {
-                const sp = statusParcelaStyle(c.statusParcela);
-                return (
-                  <tr key={c.id} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steel, fontFamily: "monospace" }}>{fmtDate(c.dataSLA)}</td>
-                    <td style={{ padding: "10px 16px" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.ice }}>{c.cliente}</div>
-                      <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{c.unidade}</div>
-                    </td>
-                    <td style={{ padding: "10px 16px", fontSize: 12.5, color: COLORS.steelLight, maxWidth: 220 }}>{c.servico}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steel }}>{c.tarefa}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steelLight }}>{c.tecnico}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12.5, color: COLORS.steelLight }}>{fmtBRL(c.valorFaturamento)}</td>
-                    <td style={{ padding: "10px 16px" }}><Pill fg={sp.fg} bg={sp.bg}>{c.statusParcela}</Pill></td>
-                  </tr>
-                );
-              })}
-              {filtrados.length === 0 && <tr><td colSpan={7} style={{ padding: 40, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum contrato com Data SLA neste período.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <Pagination page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalItems={filtrados.length} />
-      </div>
-    </div>
-  );
-}
-
 /* ============================================================
-   PLANEJAMENTO MENSAL (Dashboard) — comparativo simples do mes:
-   servicos faturados x nao faturados, por Data SLA
+   PLANEJAMENTO FINANCEIRO — tela única, dividida em duas colunas:
+   à esquerda o panorama do ano inteiro (todos os status, mês a
+   mês), à direita o foco no mês selecionado (faturado x não
+   faturado). Os mesmos filtros (cliente, unidade, contrato,
+   serviço, ano, mês) valem para os dois lados.
    ============================================================ */
-function PlanejamentoMensalDashboardPage({ contratos, onOpenContrato }) {
+function PlanejamentoFinanceiroPage({ contratos, onOpenContrato }) {
   const hojeRef = new Date();
   const [ano, setAno] = useState(String(hojeRef.getFullYear()));
   const [mes, setMes] = useState(String(hojeRef.getMonth() + 1));
+  const [filtroCliente, setFiltroCliente] = useState([]);
+  const [filtroUnidade, setFiltroUnidade] = useState([]);
+  const [filtroContrato, setFiltroContrato] = useState([]);
+  const [filtroServico, setFiltroServico] = useState([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -3336,87 +3269,162 @@ function PlanejamentoMensalDashboardPage({ contratos, onOpenContrato }) {
     anos.add(String(hojeRef.getFullYear()));
     return Array.from(anos).sort();
   }, [contratos]); // eslint-disable-line
+  useEffect(() => { if (!anosDisponiveis.includes(ano)) setAno(anosDisponiveis[anosDisponiveis.length - 1]); }, [anosDisponiveis]); // eslint-disable-line
 
-  const doMes = useMemo(() => contratos.filter((c) => c.dataSLA && c.dataSLA.slice(0, 4) === ano && String(parseInt(c.dataSLA.slice(5, 7), 10)) === mes && c.statusParcela !== "Suspenso"), [contratos, ano, mes]);
-  const faturados = doMes.filter((c) => c.statusParcela === "Faturado");
-  const naoFaturados = doMes.filter((c) => c.statusParcela !== "Faturado");
+  const clientes = useMemo(() => Array.from(new Set(contratos.map((c) => c.cliente))).sort(), [contratos]);
+  const unidades = useMemo(() => {
+    const base = filtroCliente.length ? contratos.filter((c) => filtroCliente.includes(c.cliente)) : contratos;
+    return Array.from(new Set(base.map((c) => c.unidade))).sort();
+  }, [contratos, filtroCliente]);
+  const contratosOpts = useMemo(() => Array.from(new Set(contratos.map((c) => c.proposta))).sort(), [contratos]);
+  const servicos = useMemo(() => Array.from(new Set(contratos.map((c) => c.servico))).sort(), [contratos]);
 
-  const valorTotal = doMes.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const valorFaturado = faturados.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const valorNaoFaturado = naoFaturados.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
-  const pctFaturado = doMes.length === 0 ? 0 : Math.round((faturados.length / doMes.length) * 100);
+  const aplicarFiltrosComuns = (lista) => lista.filter((c) => {
+    if (filtroCliente.length && !filtroCliente.includes(c.cliente)) return false;
+    if (filtroUnidade.length && !filtroUnidade.includes(c.unidade)) return false;
+    if (filtroContrato.length && !filtroContrato.includes(c.proposta)) return false;
+    if (filtroServico.length && !filtroServico.includes(c.servico)) return false;
+    return true;
+  });
 
-  const pieData = [
-    { name: "Faturado", value: valorFaturado },
-    { name: "Não faturado", value: valorNaoFaturado },
+  const doAno = useMemo(() => aplicarFiltrosComuns(contratos.filter((c) => c.dataSLA && c.dataSLA.slice(0, 4) === ano)),
+    [contratos, ano, filtroCliente, filtroUnidade, filtroContrato, filtroServico]);
+  const doMesTodos = useMemo(() => doAno.filter((c) => c.dataSLA && String(parseInt(c.dataSLA.slice(5, 7), 10)) === mes), [doAno, mes]);
+  const doMes = useMemo(() => doMesTodos.filter((c) => c.statusParcela !== "Suspenso"), [doMesTodos]);
+
+  // ---- Lado esquerdo: ano inteiro, todos os status ----
+  const totalPlanejadoAno = doAno.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const totalFaturadoAno = doAno.filter((c) => c.statusParcela === "Faturado").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const totalAndamentoAno = doAno.filter((c) => c.statusParcela === "Em andamento").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const totalConcluidoNaoFaturadoAno = doAno.filter((c) => c.statusParcela === "Concluído / Não faturado").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const totalSuspensoAno = doAno.filter((c) => c.statusParcela === "Suspenso").reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+
+  const chartDataAno = useMemo(() => {
+    const map = {};
+    for (let m = 1; m <= 12; m++) map[m] = { label: MESES_ABREV[m - 1], "Concluído / Não faturado": 0, "Em andamento": 0, "Faturado": 0, "Suspenso": 0 };
+    doAno.forEach((c) => {
+      const m = parseInt(c.dataSLA.slice(5, 7), 10);
+      if (!map[m]) return;
+      map[m][c.statusParcela] = (map[m][c.statusParcela] || 0) + (c.valorFaturamento || 0);
+    });
+    return Object.values(map);
+  }, [doAno]);
+
+  // ---- Lado direito: mês selecionado (suspensos ficam de fora, ver nota) ----
+  const faturadosMes = doMes.filter((c) => c.statusParcela === "Faturado");
+  const naoFaturadosMes = doMes.filter((c) => c.statusParcela !== "Faturado");
+  const valorTotalMes = doMes.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const valorFaturadoMes = faturadosMes.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const valorNaoFaturadoMes = naoFaturadosMes.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+  const pctFaturadoMes = doMes.length === 0 ? 0 : Math.round((faturadosMes.length / doMes.length) * 100);
+  const pieDataMes = [
+    { name: "Faturado", value: valorFaturadoMes },
+    { name: "Não faturado", value: valorNaoFaturadoMes },
   ].filter((d) => d.value > 0);
   const PIE_COLORS = { "Faturado": COLORS.green, "Não faturado": COLORS.orange };
 
-  const ordenados = useMemo(() => [...doMes].sort((a, b) => (a.dataSLA || "").localeCompare(b.dataSLA || "")), [doMes]);
-  const paginados = useMemo(() => paginate(ordenados, page, pageSize), [ordenados, page, pageSize]);
+  const ordenadosMes = useMemo(() => [...doMes].sort((a, b) => (a.dataSLA || "").localeCompare(b.dataSLA || "")), [doMes]);
+  const paginadosMes = useMemo(() => paginate(ordenadosMes, page, pageSize), [ordenadosMes, page, pageSize]);
 
   return (
     <div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, color: COLORS.steel, fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          <Filter size={13} /> Mês de referência
+          <Filter size={13} /> Filtros
         </div>
+        <MultiSelectDropdown label="Clientes" options={clientes} selected={filtroCliente} onApply={(v) => { setFiltroCliente(v); setFiltroUnidade([]); setPage(1); }} />
+        <MultiSelectDropdown label="Unidades" options={unidades} selected={filtroUnidade} onApply={(v) => { setFiltroUnidade(v); setPage(1); }} />
+        <MultiSelectDropdown label="Contratos" options={contratosOpts} selected={filtroContrato} onApply={(v) => { setFiltroContrato(v); setPage(1); }} />
+        <MultiSelectDropdown label="Serviços" options={servicos} selected={filtroServico} onApply={(v) => { setFiltroServico(v); setPage(1); }} width={180} />
         <Select value={ano} onChange={(v) => { setAno(v); setPage(1); }} options={anosDisponiveis} />
         <select value={mes} onChange={(e) => { setMes(e.target.value); setPage(1); }} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "8px 10px", color: COLORS.steelLight, fontSize: 12.5, fontFamily: "'Inter', sans-serif" }}>
           {MESES_NOMES.map((nome, i) => <option key={nome} value={String(i + 1)}>{nome}</option>)}
         </select>
       </div>
-      <div style={{ fontSize: 11.5, color: COLORS.steel, marginBottom: 18 }}>Serviços suspensos não entram nesta comparação — consulte-os em Contratos ou no Planejamento Financeiro.</div>
 
-      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-        <KpiCard icon={DollarSign} label="Total do mês" value={fmtBRL(valorTotal)} accent={COLORS.blue} sub={`${doMes.length} serviço(s)`} />
-        <KpiCard icon={CheckCircle2} label="Faturado" value={`${pctFaturado}%`} accent={COLORS.green} sub={`${fmtBRL(valorFaturado)} · ${faturados.length} serviço(s)`} />
-        <KpiCard icon={AlertTriangle} label="Não faturado" value={fmtBRL(valorNaoFaturado)} accent={COLORS.orange} sub={`${naoFaturados.length} serviço(s)`} />
-      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, alignItems: "start" }}>
 
-      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18, marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: 14 }}>Faturado x não faturado — {MESES_NOMES[parseInt(mes, 10) - 1]}/{ano}</div>
-        <ResponsiveContainer width="100%" height={230}>
-          <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={3}>
-              {pieData.map((d, i) => <Cell key={i} fill={PIE_COLORS[d.name]} />)}
-            </Pie>
-            <Tooltip formatter={(v) => fmtBRL(v)} contentStyle={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} />
-            <Legend wrapperStyle={{ fontSize: 11, color: COLORS.steelLight }} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden" }}>
-        <div style={{ fontSize: 12, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, padding: "12px 18px 10px" }}>Serviços do mês</div>
-        <div style={{ overflowX: "auto" }}>
-          <table>
-            <thead><tr>{["Cliente / Unidade", "Serviço", "Tarefa", "Técnico", "Valor", "Data SLA", "Status parcela"].map((h) => (
-              <th key={h} style={{ textAlign: "left", padding: "10px 16px", fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: `1px solid ${COLORS.border}` }}>{h}</th>
-            ))}</tr></thead>
-            <tbody>
-              {paginados.map((c) => {
-                const sp = statusParcelaStyle(c.statusParcela);
-                return (
-                  <tr key={c.id} className="row-hover" style={{ cursor: onOpenContrato ? "pointer" : "default", borderBottom: `1px solid ${COLORS.border}` }} onClick={onOpenContrato}>
-                    <td style={{ padding: "10px 16px" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.ice }}>{c.cliente}</div>
-                      <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{c.unidade}</div>
-                    </td>
-                    <td style={{ padding: "10px 16px", fontSize: 12.5, color: COLORS.steelLight, maxWidth: 220 }}>{c.servico}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steel }}>{c.tarefa}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steelLight }}>{c.tecnico}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12.5, color: COLORS.steelLight }}>{fmtBRL(c.valorFaturamento)}</td>
-                    <td style={{ padding: "10px 16px", fontSize: 12, color: COLORS.steel }}>{fmtDate(c.dataSLA)}</td>
-                    <td style={{ padding: "10px 16px" }}><Pill fg={sp.fg} bg={sp.bg}>{c.statusParcela}</Pill></td>
-                  </tr>
-                );
-              })}
-              {doMes.length === 0 && <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum contrato com Data SLA neste mês.</td></tr>}
-            </tbody>
-          </table>
+        <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, color: COLORS.ice, textTransform: "uppercase", letterSpacing: "0.02em" }}>Planejamento Financeiro</div>
+            <div style={{ marginLeft: "auto", fontSize: 10, color: COLORS.steel, background: "rgba(255,255,255,0.06)", padding: "3px 9px", borderRadius: 999 }}>{ano}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <KpiCard icon={DollarSign} label="Total planejado" value={fmtBRL(totalPlanejadoAno)} accent={COLORS.blue} sub={`ano ${ano}`} />
+            <KpiCard icon={CheckCircle2} label="Faturado" value={fmtBRL(totalFaturadoAno)} accent={COLORS.green} sub="parcelas já faturadas" />
+            <KpiCard icon={Clock} label="Em andamento" value={fmtBRL(totalAndamentoAno)} accent={COLORS.blue} sub="parcelas em execução" />
+            <KpiCard icon={AlertTriangle} label="Concluído / Não fat." value={fmtBRL(totalConcluidoNaoFaturadoAno)} accent={COLORS.orange} sub="pronto, falta faturar" />
+          </div>
+          <div style={{ background: COLORS.panelAlt, borderRadius: 8, padding: 14 }}>
+            <div style={{ fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>Planejamento por mês — todos os status</div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={chartDataAno} margin={{ left: 0, right: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: COLORS.steelLight, fontSize: 10.5 }} axisLine={{ stroke: COLORS.border }} tickLine={false} />
+                <YAxis tick={{ fill: COLORS.steel, fontSize: 10 }} axisLine={{ stroke: COLORS.border }} tickLine={false} />
+                <Tooltip formatter={(v) => fmtBRL(v)} contentStyle={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
+                <Legend wrapperStyle={{ fontSize: 10, color: COLORS.steelLight }} />
+                <Bar dataKey="Concluído / Não faturado" stackId="a" fill={COLORS.orange} />
+                <Bar dataKey="Em andamento" stackId="a" fill={COLORS.blue} />
+                <Bar dataKey="Faturado" stackId="a" fill={COLORS.green} />
+                <Bar dataKey="Suspenso" stackId="a" fill={COLORS.steel} radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <Pagination page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalItems={ordenados.length} />
+
+        <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, color: COLORS.ice, textTransform: "uppercase", letterSpacing: "0.02em" }}>Planejamento do mês</div>
+            <div style={{ marginLeft: "auto", fontSize: 10, color: COLORS.steel, background: "rgba(255,255,255,0.06)", padding: "3px 9px", borderRadius: 999 }}>{MESES_NOMES[parseInt(mes, 10) - 1]}/{ano}</div>
+          </div>
+          <div style={{ fontSize: 10.5, color: COLORS.steel, marginBottom: 12 }}>Serviços suspensos não entram nesta comparação — consulte-os no painel ao lado ou em Contratos.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <KpiCard icon={DollarSign} label="Total do mês" value={fmtBRL(valorTotalMes)} accent={COLORS.blue} sub={`${doMes.length} serviço(s)`} />
+            <KpiCard icon={CheckCircle2} label="Faturado" value={`${pctFaturadoMes}%`} accent={COLORS.green} sub={fmtBRL(valorFaturadoMes)} />
+          </div>
+          <div style={{ background: COLORS.panelAlt, borderRadius: 8, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>Faturado x não faturado</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={pieDataMes} dataKey="value" nameKey="name" innerRadius={48} outerRadius={74} paddingAngle={3}>
+                  {pieDataMes.map((d, i) => <Cell key={i} fill={PIE_COLORS[d.name]} />)}
+                </Pie>
+                <Tooltip formatter={(v) => fmtBRL(v)} contentStyle={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 10.5, color: COLORS.steelLight }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ background: COLORS.panelAlt, borderRadius: 8, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead><tr>{["Cliente / Unidade", "Serviço", "Valor", "Status"].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${COLORS.border}`, whiteSpace: "nowrap" }}>{h}</th>
+                ))}</tr></thead>
+                <tbody>
+                  {paginadosMes.map((c) => {
+                    const sp = statusParcelaStyle(c.statusParcela);
+                    return (
+                      <tr key={c.id} className="row-hover" style={{ cursor: onOpenContrato ? "pointer" : "default", borderBottom: `1px solid ${COLORS.border}` }} onClick={() => onOpenContrato && onOpenContrato(c.cliente, c.unidade, c.proposta)}>
+                        <td style={{ padding: "8px 12px" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.ice }}>{c.cliente}</div>
+                          <div style={{ fontSize: 10.5, color: COLORS.steel }}>{c.unidade}</div>
+                        </td>
+                        <td style={{ padding: "8px 12px", fontSize: 11.5, color: COLORS.steelLight, maxWidth: 160 }}>{c.servico}</td>
+                        <td style={{ padding: "8px 12px", fontSize: 11.5, color: COLORS.steelLight, whiteSpace: "nowrap" }}>{fmtBRL(c.valorFaturamento)}</td>
+                        <td style={{ padding: "8px 12px" }}><Pill fg={sp.fg} bg={sp.bg}>{c.statusParcela}</Pill></td>
+                      </tr>
+                    );
+                  })}
+                  {doMes.length === 0 && <tr><td colSpan={4} style={{ padding: 24, textAlign: "center", color: COLORS.steel, fontSize: 12.5 }}>Nenhum serviço neste mês.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalItems={ordenadosMes.length} />
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -3777,7 +3785,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
   const [confirmExcluirProcessos, setConfirmExcluirProcessos] = useState(false);
   const [processosPageSize, setProcessosPageSize] = useState(10);
   useEffect(() => { setProcessosPage(1); }, [busca, filtros]);
-  const isDashboard = tab === "dashboard-processos" || tab === "dashboard-financeiro" || tab === "dashboard-planejamento";
+  const isDashboard = tab === "dashboard-processos" || tab === "dashboard-financeiro";
   const isClientes = tab === "clientes" || tab === "unidades" || tab === "contratos" || tab === "importar-contratos";
   const updateProcesso = (novo) => {
     setProcessos((prev) => prev.map((p) => (p.id === novo.id ? novo : p)));
@@ -3934,8 +3942,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 2, marginLeft: 14, marginBottom: 4 }}>
               {[
                 { id: "dashboard-processos", label: "Processos", icon: FileStack },
-                { id: "dashboard-financeiro", label: "Planejamento Mensal", icon: DollarSign },
-                ...(isAdmin ? [{ id: "dashboard-planejamento", label: "Planejamento Financeiro", icon: Clock }] : []),
+                { id: "dashboard-financeiro", label: "Planejamento Financeiro", icon: DollarSign },
               ].map((item) => (
                 <div key={item.id} className="nav-item" onClick={() => setTab(item.id)} style={{
                   display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", borderRadius: 7,
@@ -3974,8 +3981,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
           <div>
             <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600, color: COLORS.ice, textTransform: "uppercase", letterSpacing: "0.02em" }}>
               {tab === "dashboard-processos" && "Dashboard · Processos"}
-              {tab === "dashboard-financeiro" && "Dashboard · Planejamento Mensal"}
-              {tab === "dashboard-planejamento" && "Dashboard · Planejamento Financeiro"}
+              {tab === "dashboard-financeiro" && "Dashboard · Planejamento Financeiro"}
               {tab === "clientes" && "Clientes"}
               {tab === "unidades" && "Unidades de clientes"}
               {tab === "contratos" && "Contratos"}
@@ -3986,8 +3992,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
             </h1>
             <p style={{ fontSize: 12.5, color: COLORS.steel, marginTop: 2 }}>
               {tab === "dashboard-processos" && `${total} de ${processos.length} processos totais no filtro atual`}
-              {tab === "dashboard-financeiro" && "Serviços faturados x não faturados, mês a mês"}
-              {tab === "dashboard-planejamento" && "Financeiro previsto e realizado por mês, conforme a Data SLA de cada contrato"}
+              {tab === "dashboard-financeiro" && "Panorama do ano inteiro lado a lado com o planejamento do mês selecionado"}
               {tab === "clientes" && "Clientes reconhecidos a partir dos contratos importados"}
               {tab === "unidades" && "Unidades reconhecidas a partir dos contratos importados"}
               {tab === "contratos" && `${contratos.length} linha(s) de contrato importada(s)`}
@@ -4118,7 +4123,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
           </>
         )}
 
-        {tab === "dashboard-financeiro" && <PlanejamentoMensalDashboardPage contratos={contratos} onOpenContrato={() => setTab("contratos")} />}
+        {tab === "dashboard-financeiro" && <PlanejamentoFinanceiroPage contratos={contratos} onOpenContrato={abrirPopupContrato} />}
 
         {tab === "processos" && (
           <>
@@ -4191,7 +4196,6 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
         {tab === "clientes" && <ClientesPage contratos={contratos} onAddContrato={(row) => addContratoManual(row, false)} isAdmin={isAdmin} onOpenCliente={abrirPopupCliente} onExcluirClientes={excluirClientes} />}
         {tab === "unidades" && <UnidadesPage contratos={contratos} onAddContrato={(row) => addContratoManual(row, false)} onOpenUnidade={abrirPopupUnidade} isAdmin={isAdmin} onExcluirUnidades={excluirUnidades} />}
         {tab === "contratos" && <ContratosPage contratos={contratos} processos={processos} onUpdateContrato={updateContrato} onAddContrato={(row) => addContratoManual(row, true)} onExcluirContratos={excluirContratosEmCascata} isAdmin={isAdmin} onOpenContrato={abrirPopupContrato} />}
-        {tab === "dashboard-planejamento" && isAdmin && <PlanejamentoMensalPage contratos={contratos} />}
         {tab === "importar-contratos" && isAdmin && <ImportarClientesContratosPage onImport={importarContratosPersistindo} />}
 
         {tab === "atualizacoes" && <AtualizacoesPage processos={processos} onOpenProcesso={(p) => setSelected(p)} />}
@@ -4217,7 +4221,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
       )}
       {popupAtual?.type === "contrato" && (
         <ContratoDetalheCompletoModal proposta={popupAtual.proposta} cliente={popupAtual.cliente} unidade={popupAtual.unidade}
-          contratos={contratos} processos={processos} onUpdateContrato={updateContrato} onDeleteContrato={deleteContrato}
+          contratos={contratos} processos={processos} onUpdateContrato={updateContrato} onDeleteContrato={deleteContrato} onExcluirContratos={excluirContratosEmCascata}
           onAddContrato={(row) => addContratoManual(row, true)} isAdmin={isAdmin}
           clientesExistentes={Array.from(new Set(contratos.map((c) => c.cliente))).sort()}
           onClose={fecharPopups} onBack={popupStack.length > 1 ? voltarPopup : null} />
