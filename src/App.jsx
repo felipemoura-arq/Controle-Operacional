@@ -20,7 +20,7 @@ import {
    painel do Supabase → Project Settings → API → "Project URL" e
    a chave "anon public" (a chave "service_role" NUNCA vai aqui).
    ============================================================ */
-const SUPABASE_URL = "https://wvjznkqdmmidudwdvqqc.supabase.co";
+const SUPABASE_URL = "wvjznkqdmmidudwdvqqc";
 const SUPABASE_ANON_KEY = "sb_publishable_XTxSZL05rQhMSU0cFOFxpQ_L11jLiZD";
 const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith("http");
 const supabase = createClient(
@@ -43,6 +43,41 @@ const COLORS = {
   gray: "#5b6675", grayDim: "rgba(91,102,117,0.18)",
   overdue: "#c23b32", overdueDim: "rgba(194,59,50,0.20)",
 };
+
+/* ============================================================
+   MARCA/TEMA — logo e até 3 cores personalizáveis pelo
+   administrador (branco-rótulo: o mesmo sistema pode ser vendido
+   para outras empresas). Variáveis mutáveis a nível de módulo,
+   aplicadas antes da primeira renderização.
+   ============================================================ */
+let LOGO_BASE64 = null;
+let NOME_RESPONSAVEL = "Primers";
+function rotuloResponsavel(valor) { return valor === "Primers" ? NOME_RESPONSAVEL : valor; }
+function hexParaRgba(hex, alpha) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return `rgba(225,72,61,${alpha})`;
+  const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+function ajustarClaridade(hex, fator) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return hex;
+  const canal = (i) => Math.min(255, Math.round(parseInt(h.substring(i, i + 2), 16) * fator));
+  const hex2 = (n) => n.toString(16).padStart(2, "0");
+  return `#${hex2(canal(0))}${hex2(canal(2))}${hex2(canal(4))}`;
+}
+function aplicarTema(cfg) {
+  if (!cfg) return;
+  if (cfg.cor_primaria) { COLORS.red = cfg.cor_primaria; COLORS.redDim = hexParaRgba(cfg.cor_primaria, 0.16); }
+  if (cfg.cor_fundo) COLORS.bg = cfg.cor_fundo;
+  if (cfg.cor_painel) {
+    COLORS.panel = cfg.cor_painel;
+    COLORS.panelAlt = ajustarClaridade(cfg.cor_painel, 1.35);
+    COLORS.panelSoft = ajustarClaridade(cfg.cor_painel, 1.18);
+  }
+  LOGO_BASE64 = cfg.logo_base64 || null;
+  NOME_RESPONSAVEL = cfg.nome_empresa && cfg.nome_empresa.trim() ? cfg.nome_empresa.trim() : "Primers";
+}
 
 /* ============================================================
    MODELO DE STATUS — cada status tem um responsável pela próxima ação
@@ -561,7 +596,7 @@ function gerarRelatorioHTML(processo) {
   </style></head><body>
   <h1>Relatório de conformidade — ${processo.assunto}</h1>
   <div class="meta">${processo.cliente} — ${processo.unidade} · ${processo.cidade}/${processo.uf} · ${processo.tipo === "Serviço Técnico" ? "Serviço" : "Processo"} nº ${processo.numero}</div>
-  <div class="meta">Gerado em ${fmtDate(new Date().toISOString().slice(0,10))} · Primers Consultoria e Legalização Imobiliária</div>
+  <div class="meta">Gerado em ${fmtDate(new Date().toISOString().slice(0,10))}</div>
   <p style="margin-top:16px;">
     <span class="badge ${pronto ? "ok" : "warn"}">${pronto ? "Pronto para protocolo" : `${pendencias.length} pendência(s) para protocolo`}</span>
     <span class="badge ${docPct === 100 ? "ok" : "warn"}">Documentos ${docPct}%</span>
@@ -640,7 +675,7 @@ function Select({ value, onChange, options, placeholder }) {
    aplica de verdade quando se clica em "OK" (a seleção provisória
    não afeta a tela até confirmar).
    ============================================================ */
-function MultiSelectDropdown({ label, options, selected, onApply, width }) {
+function MultiSelectDropdown({ label, options, selected, onApply, width, labelFor }) {
   const [open, setOpen] = useState(false);
   const [temp, setTemp] = useState(selected);
   const ref = useRef(null);
@@ -653,7 +688,8 @@ function MultiSelectDropdown({ label, options, selected, onApply, width }) {
   }, []);
 
   const toggle = (opt) => setTemp((t) => (t.includes(opt) ? t.filter((x) => x !== opt) : [...t, opt]));
-  const rotulo = selected.length === 0 ? label : selected.length === 1 ? selected[0] : `${selected.length} selecionados`;
+  const exibir = (v) => (labelFor ? labelFor(v) : v);
+  const rotulo = selected.length === 0 ? label : selected.length === 1 ? exibir(selected[0]) : `${selected.length} selecionados`;
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -676,7 +712,7 @@ function MultiSelectDropdown({ label, options, selected, onApply, width }) {
             {options.map((opt) => (
               <label key={opt} className="row-hover" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 8px", cursor: "pointer", borderRadius: 5 }}>
                 <input type="checkbox" checked={temp.includes(opt)} onChange={() => toggle(opt)} />
-                <span style={{ fontSize: 12.5, color: COLORS.ice, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opt}</span>
+                <span style={{ fontSize: 12.5, color: COLORS.ice, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{exibir(opt)}</span>
               </label>
             ))}
           </div>
@@ -714,7 +750,7 @@ function FilterBar({ processos, filtros, setFiltros }) {
       <MultiSelectDropdown label="Clientes" options={clientes} selected={filtros.cliente} onApply={set("cliente")} />
       <MultiSelectDropdown label="Unidades" options={unidades} selected={filtros.unidade} onApply={set("unidade")} />
       <MultiSelectDropdown label="Tipos de serviço" options={assuntos} selected={filtros.assunto} onApply={set("assunto")} width={180} />
-      <MultiSelectDropdown label="Responsabilidade" options={RESPONSAVEIS} selected={filtros.responsavel} onApply={set("responsavel")} />
+      <MultiSelectDropdown label="Responsabilidade" options={RESPONSAVEIS} selected={filtros.responsavel} onApply={set("responsavel")} labelFor={rotuloResponsavel} />
       {algumFiltroAtivo > 0 && (
         <button onClick={() => setFiltros({ cliente: [], unidade: [], assunto: [], responsavel: [] })}
           style={{ background: "transparent", border: "none", color: COLORS.red, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>
@@ -779,7 +815,7 @@ function NewProcessModal({ onClose, onSave, processos, isAdmin }) {
           <div style={{ gridColumn: "1 / -1" }}>{field("Assunto / Serviço", "assunto", "Ex: Aprovação de Projeto - Prefeitura (Obra Nova)")}</div>
           {selectField("Tipo de serviço", "tipo", CONTRATO_TIPO_OPTIONS)}
           {field("Nº do processo", "numero", "Ex: 1101.2025/0001")}
-          <div style={{ gridColumn: "1 / -1" }}>{selectField("Status atual (responsabilidade)", "statusAtual", STATUS_KEYS, (k) => `${STATUS_CONFIG[k].label} — ${STATUS_CONFIG[k].responsavel}`)}</div>
+          <div style={{ gridColumn: "1 / -1" }}>{selectField("Status atual (responsabilidade)", "statusAtual", STATUS_KEYS, (k) => `${STATUS_CONFIG[k].label} — ${rotuloResponsavel(STATUS_CONFIG[k].responsavel)}`)}</div>
           {field("Data de protocolo", "dataProtocolo", "", "date")}
           {field("Previsão de análise do órgão", "dataPrevisaoOrgao", "", "date")}
           {field("Data de atendimento de exigência", "dataAtendimentoExigencia", "", "date")}
@@ -1138,7 +1174,7 @@ function AtualizacoesTab({ processo, onUpdate }) {
           </select>
           <select value={form.responsavel} onChange={(e) => setForm((f) => ({ ...f, responsavel: e.target.value }))}
             style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12.5 }}>
-            {["Primers", "Cliente", "Órgão"].map((r) => <option key={r} value={r}>{r}</option>)}
+            {["Primers", "Cliente", "Órgão"].map((r) => <option key={r} value={r}>{rotuloResponsavel(r)}</option>)}
           </select>
         </div>
         <textarea value={form.descricao} onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="Descreva o que aconteceu..." rows={2}
@@ -1161,7 +1197,7 @@ function AtualizacoesTab({ processo, onUpdate }) {
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 3, flexWrap: "wrap" }}>
               <Pill fg={COLORS.steelLight} bg="rgba(255,255,255,0.06)">{a.tipo}</Pill>
-              <span style={{ fontSize: 10.5, color: COLORS.steel }}>resp.: {a.responsavel}</span>
+              <span style={{ fontSize: 10.5, color: COLORS.steel }}>resp.: {rotuloResponsavel(a.responsavel)}</span>
             </div>
             <div style={{ fontSize: 12.5, color: COLORS.ice, lineHeight: 1.5 }}>{a.descricao}</div>
           </div>
@@ -1349,21 +1385,19 @@ function LinhaDoTempoTab({ processo }) {
 /* ============================================================
    EXPORTAÇÕES ELEGANTES — Status de Serviço e Linha do Tempo
    ============================================================ */
-const PRINT_BRAND_CSS = `
+function printBrandCSS() {
+  return `
   * { box-sizing: border-box; }
   body{font-family:'Segoe UI', Arial, Helvetica, sans-serif;color:#16283d;margin:0;background:#fff;}
-  .brand{background:#0f1e30;padding:30px 40px;border-bottom:5px solid #e1483d;}
-  .brand-row{display:flex;align-items:center;gap:10px;}
-  .brand-bars{display:flex;gap:3px;}
-  .brand-bars div{width:5px;height:22px;}
-  .brand-name{font-family:Georgia,'Times New Roman',serif;font-weight:700;font-size:24px;color:#e1483d;letter-spacing:0.02em;}
-  .brand-sub{color:#8493a6;font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;margin-top:3px;margin-left:1px;}
-  .brand-title{color:#eef2f6;font-size:16px;margin-top:18px;font-weight:600;}
+  .brand{background:${COLORS.bg};padding:26px 40px;border-bottom:5px solid ${COLORS.red};}
+  .brand-row{display:flex;align-items:center;gap:10px;min-height:40px;}
+  .brand-name{font-family:Georgia,'Times New Roman',serif;font-weight:700;font-size:22px;color:${COLORS.red};letter-spacing:0.02em;}
+  .brand-title{color:#eef2f6;font-size:16px;margin-top:16px;font-weight:600;}
   .brand-meta{color:#b7c2cf;font-size:12px;margin-top:4px;}
   .content{padding:30px 40px;}
-  h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#0f1e30;margin:26px 0 10px;border-left:4px solid #e1483d;padding-left:9px;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:${COLORS.bg};margin:26px 0 10px;border-left:4px solid ${COLORS.red};padding-left:9px;}
   table{width:100%;border-collapse:collapse;font-size:12px;}
-  th{background:#0f1e30;color:#eef2f6;padding:9px 10px;text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;}
+  th{background:${COLORS.bg};color:#eef2f6;padding:9px 10px;text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;}
   td{padding:9px 10px;border-bottom:1px solid #e6e9ed;}
   tr:nth-child(even) td{background:#f7f9fb;}
   .badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:700;}
@@ -1371,13 +1405,13 @@ const PRINT_BRAND_CSS = `
   .kv{font-size:12px;color:#5b6675;} .kv b{display:block;color:#16283d;font-size:13.5px;font-weight:600;margin-top:2px;}
   .footer{padding:18px 40px;color:#8493a6;font-size:10.5px;border-top:1px solid #e6e9ed;margin-top:20px;}
 `;
+}
 function brandHeader(title, subtitle) {
+  const logoHtml = LOGO_BASE64
+    ? `<img src="${LOGO_BASE64}" style="max-height:44px;max-width:200px;object-fit:contain;" />`
+    : `<span class="brand-name">CONTROLE OPERACIONAL</span>`;
   return `<div class="brand">
-    <div class="brand-row">
-      <div class="brand-bars"><div style="background:#3a4a63"></div><div style="background:#93a2b5"></div><div style="background:#d7dee6"></div><div style="background:#e1483d"></div></div>
-      <span class="brand-name">Primers</span>
-    </div>
-    <div class="brand-sub">Consultoria e Legalização Imobiliária</div>
+    <div class="brand-row">${logoHtml}</div>
     <div class="brand-title">${title}</div>
     ${subtitle ? `<div class="brand-meta">${subtitle}</div>` : ""}
   </div>`;
@@ -1394,8 +1428,8 @@ function abrirEImprimir(html) {
 function gerarStatusServicoHTML(processo) {
   const status = STATUS_CONFIG[processo.statusAtual];
   const atualizacoes = processo.atualizacoes.filter((a) => a.incluirRelatorio !== false).sort((a, b) => b.data.localeCompare(a.data));
-  const linhas = atualizacoes.map((a) => `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo}</td><td>${a.responsavel}</td><td>${a.descricao}</td></tr>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço — ${processo.assunto}</title><style>${PRINT_BRAND_CSS}</style></head><body>
+  const linhas = atualizacoes.map((a) => `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo}</td><td>${rotuloResponsavel(a.responsavel)}</td><td>${a.descricao}</td></tr>`).join("");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço — ${processo.assunto}</title><style>${printBrandCSS()}</style></head><body>
   ${brandHeader("Status de Serviço", `${processo.cliente} — ${processo.unidade} · Gerado em ${fmtDate(hojeISOStr())}`)}
   <div class="content">
     <div class="grid">
@@ -1409,7 +1443,7 @@ function gerarStatusServicoHTML(processo) {
     <h2>Histórico de atualizações</h2>
     <table><tr><th>Data</th><th>Tipo</th><th>Responsável</th><th>Descrição</th></tr>${linhas || `<tr><td colspan="4">Nenhuma atualização registrada.</td></tr>`}</table>
   </div>
-  <div class="footer">Primers Consultoria e Legalização Imobiliária — Controle Operacional e Financeiro</div>
+  <div class="footer">Controle Operacional e Financeiro</div>
   </body></html>`;
 }
 function imprimirStatusServico(processo) { abrirEImprimir(gerarStatusServicoHTML(processo)); }
@@ -1422,10 +1456,10 @@ function gerarLinhaDoTempoHTML(processo) {
       <div style="flex-shrink:0;padding-top:3px;"><div style="width:11px;height:11px;border-radius:50%;background:${e.cor};"></div></div>
       <div style="font-size:13px;color:#16283d;line-height:1.5;">${e.label}</div>
     </div>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Linha do Tempo — ${processo.assunto}</title><style>${PRINT_BRAND_CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Linha do Tempo — ${processo.assunto}</title><style>${printBrandCSS()}</style></head><body>
   ${brandHeader("Linha do Tempo do Serviço", `${processo.cliente} — ${processo.unidade} · ${processo.assunto}`)}
   <div class="content">${itens || `<p>Nenhum evento registrado ainda.</p>`}</div>
-  <div class="footer">Primers Consultoria e Legalização Imobiliária — Controle Operacional e Financeiro</div>
+  <div class="footer">Controle Operacional e Financeiro</div>
   </body></html>`;
 }
 function imprimirLinhaDoTempo(processo) { abrirEImprimir(gerarLinhaDoTempoHTML(processo)); }
@@ -1438,13 +1472,13 @@ function gerarStatusServicoGeralHTML(processos, tituloCliente) {
       <td><span class="badge" style="background:${st.bg};color:${st.fg}">${st.label}</span></td>
       <td>${fmtDate(p.ultimaAtualizacao)}</td><td>${ultima ? ultima.descricao : "—"}</td></tr>`;
   }).join("");
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço${tituloCliente ? " — " + tituloCliente : ""}</title><style>${PRINT_BRAND_CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço${tituloCliente ? " — " + tituloCliente : ""}</title><style>${printBrandCSS()}</style></head><body>
   ${brandHeader("Status de Serviço", `${tituloCliente || "Todos os clientes"} · Gerado em ${fmtDate(hojeISOStr())} · ${processos.length} serviço(s)`)}
   <div class="content">
     <table><tr><th>Cliente</th><th>Unidade</th><th>Serviço</th><th>Tipo</th><th>Status</th><th>Última atualização</th><th>Última mensagem</th></tr>
     ${linhas || `<tr><td colspan="7">Nenhum serviço encontrado.</td></tr>`}</table>
   </div>
-  <div class="footer">Primers Consultoria e Legalização Imobiliária — Controle Operacional e Financeiro</div>
+  <div class="footer">Controle Operacional e Financeiro</div>
   </body></html>`;
 }
 function imprimirStatusServicoGeral(processos, tituloCliente) { abrirEImprimir(gerarStatusServicoGeralHTML(processos, tituloCliente)); }
@@ -1987,7 +2021,7 @@ function AtualizacoesPage({ processos, onOpenProcesso }) {
     processosFiltrados.forEach((p) => {
       const ultima = p.atualizacoes[0];
       rows.push([
-        p.cliente, p.unidade, p.assunto, STATUS_CONFIG[p.statusAtual].label, STATUS_CONFIG[p.statusAtual].responsavel,
+        p.cliente, p.unidade, p.assunto, STATUS_CONFIG[p.statusAtual].label, rotuloResponsavel(STATUS_CONFIG[p.statusAtual].responsavel),
         fmtDate(p.dataProtocolo), fmtDate(p.dataPrevisaoOrgao), fmtDate(p.ultimaAtualizacao), ultima ? ultima.descricao : "",
       ]);
     });
@@ -2023,7 +2057,7 @@ function AtualizacoesPage({ processos, onOpenProcesso }) {
                 <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.ice }}>{a.processo.cliente}</span>
                 <span style={{ fontSize: 11.5, color: COLORS.steel }}>{a.processo.unidade}</span>
                 <Pill fg={COLORS.steelLight} bg="rgba(255,255,255,0.06)">{a.tipo}</Pill>
-                <span style={{ fontSize: 10.5, color: COLORS.steel }}>resp.: {a.responsavel}</span>
+                <span style={{ fontSize: 10.5, color: COLORS.steel }}>resp.: {rotuloResponsavel(a.responsavel)}</span>
               </div>
               <div style={{ fontSize: 11.5, color: COLORS.steel, marginBottom: 3 }}>{a.processo.assunto} · técnico: {a.processo.tecnico}</div>
               <div style={{ fontSize: 12.5, color: COLORS.steelLight, lineHeight: 1.5 }}>{a.descricao}</div>
@@ -2468,7 +2502,7 @@ function novaLinhaContrato(f) {
    remove logins chamando o backend seguro (Edge Function), que
    guarda a chave secreta do lado do servidor.
    ============================================================ */
-function GerenciarAcessosPage({ usuarioLogado }) {
+function GerenciarAcessosPage({ usuarioLogado, logoBase64, onLogoAtualizado }) {
   const [usuarios, setUsuarios] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -2501,6 +2535,7 @@ function GerenciarAcessosPage({ usuarioLogado }) {
 
   return (
     <div>
+      <PersonalizacaoSection logoBase64={logoBase64} onLogoAtualizado={onLogoAtualizado} />
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 20, marginBottom: 20, maxWidth: 560 }}>
         <div style={{ fontSize: 11.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 14 }}>Novo acesso</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -2555,7 +2590,114 @@ function GerenciarAcessosPage({ usuarioLogado }) {
   );
 }
 
-function LoginScreen({ onLogin }) {
+function PersonalizacaoSection({ logoBase64, onLogoAtualizado }) {
+  const [corPrimaria, setCorPrimaria] = useState(COLORS.red);
+  const [corFundo, setCorFundo] = useState(COLORS.bg);
+  const [corPainel, setCorPainel] = useState(COLORS.panel);
+  const [nomeEmpresa, setNomeEmpresa] = useState(NOME_RESPONSAVEL);
+  const [salvandoLogo, setSalvandoLogo] = useState(false);
+  const [salvandoCores, setSalvandoCores] = useState(false);
+  const [salvandoNome, setSalvandoNome] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const enviarLogo = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!["image/jpeg", "image/jpg", "image/gif", "image/png"].includes(file.type)) { setMsg("Envie um arquivo JPEG, JPG ou GIF."); return; }
+    setSalvandoLogo(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target.result;
+      const { error } = await supabase.from("configuracoes").update({ logo_base64: base64 }).eq("id", 1);
+      setSalvandoLogo(false);
+      if (error) { setMsg("Erro ao salvar o logo: " + error.message); return; }
+      onLogoAtualizado(base64);
+      setMsg("Logo atualizado.");
+    };
+    reader.readAsDataURL(file);
+  };
+  const removerLogo = async () => {
+    setSalvandoLogo(true);
+    const { error } = await supabase.from("configuracoes").update({ logo_base64: null }).eq("id", 1);
+    setSalvandoLogo(false);
+    if (!error) { onLogoAtualizado(null); setMsg("Logo removido."); }
+  };
+  const salvarNome = async () => {
+    const valor = nomeEmpresa.trim() || "Primers";
+    setSalvandoNome(true);
+    const { error } = await supabase.from("configuracoes").update({ nome_empresa: valor }).eq("id", 1);
+    setSalvandoNome(false);
+    if (error) { setMsg("Erro ao salvar o nome: " + error.message); return; }
+    NOME_RESPONSAVEL = valor;
+    setMsg("Nome salvo — recarregue a página (F5) para ver aplicado em todo o sistema.");
+  };
+  const salvarCores = async () => {
+    setSalvandoCores(true);
+    const { error } = await supabase.from("configuracoes").update({ cor_primaria: corPrimaria, cor_fundo: corFundo, cor_painel: corPainel }).eq("id", 1);
+    setSalvandoCores(false);
+    if (error) { setMsg("Erro ao salvar as cores: " + error.message); return; }
+    aplicarTema({ cor_primaria: corPrimaria, cor_fundo: corFundo, cor_painel: corPainel });
+    setMsg("Cores salvas — recarregue a página (F5) para ver aplicado em 100% do sistema.");
+  };
+
+  return (
+    <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 20, marginBottom: 20, maxWidth: 560 }}>
+      <div style={{ fontSize: 11.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 14 }}>Personalização — logo, nome e cores</div>
+
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontSize: 12, color: COLORS.steelLight, marginBottom: 8 }}>Logo do sistema (JPEG, JPG ou GIF)</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 90, height: 60, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {logoBase64 ? <img src={logoBase64} alt="Logo atual" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 10, color: COLORS.steel }}>Sem logo</span>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: COLORS.red, color: "#fff", borderRadius: 7, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase", width: "fit-content" }}>
+              <Upload size={13} /> {salvandoLogo ? "Enviando..." : "Enviar logo"}
+              <input type="file" accept="image/jpeg,image/jpg,image/gif,image/png" onChange={enviarLogo} disabled={salvandoLogo} style={{ display: "none" }} />
+            </label>
+            {logoBase64 && <button onClick={removerLogo} disabled={salvandoLogo} style={{ background: "transparent", border: `1px solid ${COLORS.red}55`, color: COLORS.red, borderRadius: 6, padding: "6px 12px", fontSize: 11.5, cursor: "pointer" }}>Remover logo</button>}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontSize: 12, color: COLORS.steelLight, marginBottom: 8 }}>Nome da empresa / responsável</div>
+        <div style={{ fontSize: 11, color: COLORS.steel, marginBottom: 8, lineHeight: 1.5 }}>
+          Usado em todo o sistema onde antes aparecia "Primers" — como rótulo de responsabilidade nos status, filtros, dashboards e documentos exportados. Não tem relação com o título fixo "CONTROLE OPERACIONAL" do menu.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={nomeEmpresa} onChange={(e) => setNomeEmpresa(e.target.value)} placeholder="Ex: Primers, Grupo XYZ..."
+            style={{ flex: 1, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "8px 10px", color: COLORS.ice, fontSize: 12.5 }} />
+          <button onClick={salvarNome} disabled={salvandoNome} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+            {salvandoNome ? "Salvando..." : "Salvar nome"}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 12, color: COLORS.steelLight, marginBottom: 8 }}>Cores da interface (até 3 cores)</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <ModalField label="Cor de destaque">
+            <input type="color" value={corPrimaria} onChange={(e) => setCorPrimaria(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+          </ModalField>
+          <ModalField label="Cor de fundo">
+            <input type="color" value={corFundo} onChange={(e) => setCorFundo(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+          </ModalField>
+          <ModalField label="Cor dos painéis">
+            <input type="color" value={corPainel} onChange={(e) => setCorPainel(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+          </ModalField>
+        </div>
+        <button onClick={salvarCores} disabled={salvandoCores} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
+          {salvandoCores ? "Salvando..." : "Salvar cores"}
+        </button>
+      </div>
+
+      {msg && <div style={{ marginTop: 12, fontSize: 12, color: COLORS.steelLight }}>{msg}</div>}
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, logoBase64 }) {
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -2583,14 +2725,11 @@ function LoginScreen({ onLogin }) {
     <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Inter', sans-serif", padding: 16 }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; } ::placeholder { color: ${COLORS.steel}; opacity: 0.7; }`}</style>
       <div style={{ width: "100%", maxWidth: 360, background: COLORS.panel, border: `1px solid ${COLORS.borderStrong}`, borderRadius: 12, padding: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 4 }}>
-          <div style={{ width: 5, height: 22, background: "#3a4a63" }} />
-          <div style={{ width: 5, height: 22, background: "#93a2b5" }} />
-          <div style={{ width: 5, height: 22, background: "#d7dee6" }} />
-          <div style={{ width: 5, height: 22, background: COLORS.red }} />
-          <span style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 19, color: COLORS.red, marginLeft: 8, letterSpacing: "0.02em" }}>PRIMERS</span>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 56, maxWidth: 220, objectFit: "contain", marginBottom: 10 }} />}
+          <div style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 18, color: COLORS.ice, letterSpacing: "0.02em", textTransform: "uppercase" }}>Controle Operacional</div>
+          <div style={{ fontSize: 10.5, color: COLORS.steel, letterSpacing: "0.06em", marginTop: 4 }}>Acesso restrito</div>
         </div>
-        <div style={{ fontSize: 10.5, color: COLORS.steel, letterSpacing: "0.06em", marginBottom: 28 }}>CONTROL — acesso restrito</div>
 
         {!SUPABASE_CONFIGURADO && (
           <div style={{ background: COLORS.yellowDim, border: `1px solid ${COLORS.yellow}55`, borderRadius: 8, padding: "10px 12px", marginBottom: 20, fontSize: 11.5, color: COLORS.yellow, lineHeight: 1.5 }}>
@@ -2612,7 +2751,7 @@ function LoginScreen({ onLogin }) {
           </button>
         </div>
         <div style={{ fontSize: 11, color: COLORS.steel, marginTop: 20, lineHeight: 1.5 }}>
-          Protótipo de testes internos — Primers Consultoria e Legalização Imobiliária.
+          Acesso restrito ao Controle Operacional.
         </div>
       </div>
     </div>
@@ -3659,7 +3798,7 @@ function ContratosPage({ contratos, processos, onUpdateContrato, onAddContrato, 
 /* ============================================================
    APP
    ============================================================ */
-function ControleProcessos({ usuarioLogado, onLogout }) {
+function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualizado }) {
   const isAdmin = usuarioLogado.role === "admin";
   OCULTAR_VALORES = !isAdmin;
   const [processos, setProcessos] = useState(MOCK_PROCESSOS);
@@ -3896,14 +4035,10 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       {/* SIDEBAR */}
       <aside style={{ width: 230, background: COLORS.panel, borderRight: `1px solid ${COLORS.border}`, padding: "22px 16px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 4 }}>
-          <div style={{ width: 5, height: 22, background: "#3a4a63" }} />
-          <div style={{ width: 5, height: 22, background: "#93a2b5" }} />
-          <div style={{ width: 5, height: 22, background: "#d7dee6" }} />
-          <div style={{ width: 5, height: 22, background: COLORS.red }} />
-          <span style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 19, color: COLORS.red, marginLeft: 8, letterSpacing: "0.02em" }}>PRIMERS</span>
+        <div style={{ marginBottom: 22 }}>
+          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 42, maxWidth: 190, objectFit: "contain", marginBottom: 8, display: "block" }} />}
+          <div style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 15, color: COLORS.ice, letterSpacing: "0.02em", textTransform: "uppercase" }}>Controle Operacional</div>
         </div>
-        <div style={{ fontSize: 10.5, color: COLORS.steel, letterSpacing: "0.06em", marginBottom: 22, marginLeft: 2 }}>CONTROL</div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <div className="nav-item" onClick={() => setClientesOpen((o) => !o)} style={{
             display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 10px", borderRadius: 7,
@@ -3955,7 +4090,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
           {[
             { id: "processos", label: "Controle de Processos", icon: ListChecks },
             { id: "atualizacoes", label: "Relatório de Status", icon: History },
-            ...(isAdmin ? [{ id: "acessos", label: "Gerenciar acessos", icon: Users }] : []),
+            ...(isAdmin ? [{ id: "acessos", label: "Área do Administrador", icon: Users }] : []),
           ].map((item) => (
             <div key={item.id} className="nav-item" onClick={() => setTab(item.id)} style={{
               display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7,
@@ -3988,7 +4123,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
               {tab === "importar-contratos" && "Importar novos clientes/contratos"}
               {tab === "processos" && "Controle de Processos"}
               {tab === "atualizacoes" && "Relatório de Status"}
-              {tab === "acessos" && "Gerenciar acessos"}
+              {tab === "acessos" && "Área do Administrador"}
             </h1>
             <p style={{ fontSize: 12.5, color: COLORS.steel, marginTop: 2 }}>
               {tab === "dashboard-processos" && `${total} de ${processos.length} processos totais no filtro atual`}
@@ -3999,7 +4134,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
               {tab === "importar-contratos" && "Envie a planilha para atualizar clientes, unidades e contratos"}
               {tab === "processos" && `${buscados.length} de ${processos.length} processo(s)`}
               {tab === "atualizacoes" && "Atualizações marcadas para aparecer no relatório, registradas em Controle de Processos"}
-              {tab === "acessos" && "Criar ou remover logins de administradores e operacionais"}
+              {tab === "acessos" && "Gerenciar acessos, personalizar o logo e as cores do sistema"}
             </p>
           </div>
           {(tab === "processos" || tab === "dashboard-processos") && (
@@ -4019,7 +4154,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
           <>
             <div style={{ display: "flex", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
               <KpiCard icon={FileStack} label="Total (filtro atual)" value={total} accent={COLORS.blue} sub={`${processos.length} no total geral`} />
-              <KpiCard icon={Clock} label="Com a Primers" value={comPrimers} accent={COLORS.orange} sub="nossa responsabilidade" />
+              <KpiCard icon={Clock} label={`Com a ${NOME_RESPONSAVEL}`} value={comPrimers} accent={COLORS.orange} sub="nossa responsabilidade" />
               <KpiCard icon={Timer} label="Com o cliente" value={comCliente} accent={COLORS.yellow} sub="aguardando retorno" />
               <KpiCard icon={Building2} label="Com o órgão" value={comOrgao} accent={COLORS.blue} sub="aguardando análise" />
               <KpiCard icon={AlertTriangle} label="Vencidos" value={vencidos} accent={COLORS.red} sub="prazo já expirado" />
@@ -4029,7 +4164,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
               <KpiCard icon={Wrench} label="Serviço Técnico" value={tecnicos} accent={COLORS.steelLight} sub="serviços técnicos" />
               <KpiCard icon={Clock} label="Aguardando início" value={aguardandoInicio} accent={COLORS.steel} sub="importados, ainda não iniciados" />
               <KpiCard icon={Search} label="Em análise" value={emAnalise} accent={COLORS.blue} sub="protocolado / aguardando órgão" />
-              <KpiCard icon={AlertTriangle} label="Em exigência" value={emExigencia} accent={COLORS.orange} sub="Primers ou cliente" />
+              <KpiCard icon={AlertTriangle} label="Em exigência" value={emExigencia} accent={COLORS.orange} sub={`${NOME_RESPONSAVEL} ou cliente`} />
               <KpiCard icon={XCircle} label="Indeferidos" value={indeferidos} accent={COLORS.overdue} sub="negados pelo órgão" />
             </div>
 
@@ -4055,8 +4190,8 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
                     <Pie data={porResponsavel} dataKey="value" nameKey="name" innerRadius={52} outerRadius={80} paddingAngle={3}>
                       {porResponsavel.map((entry, i) => <Cell key={i} fill={RESP_COLOR[entry.name]} />)}
                     </Pie>
-                    <Tooltip contentStyle={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 11, color: COLORS.steelLight }} />
+                    <Tooltip formatter={(value, name) => [value, rotuloResponsavel(name)]} contentStyle={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12 }} />
+                    <Legend formatter={(value) => rotuloResponsavel(value)} wrapperStyle={{ fontSize: 11, color: COLORS.steelLight }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -4199,7 +4334,7 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
         {tab === "importar-contratos" && isAdmin && <ImportarClientesContratosPage onImport={importarContratosPersistindo} />}
 
         {tab === "atualizacoes" && <AtualizacoesPage processos={processos} onOpenProcesso={(p) => setSelected(p)} />}
-        {tab === "acessos" && isAdmin && <GerenciarAcessosPage usuarioLogado={usuarioLogado} />}
+        {tab === "acessos" && isAdmin && <GerenciarAcessosPage usuarioLogado={usuarioLogado} logoBase64={logoBase64} onLogoAtualizado={onLogoAtualizado} />}
       </main>
       </div>
 
@@ -4241,6 +4376,19 @@ function ControleProcessos({ usuarioLogado, onLogout }) {
 export default function App() {
   const [usuarioLogado, setUsuarioLogado] = useState(null);
   const [verificandoSessao, setVerificandoSessao] = useState(true);
+  const [logoBase64, setLogoBase64] = useState(null);
+  const [, forcarAtualizacaoTema] = useState(0);
+
+  useEffect(() => {
+    if (!SUPABASE_CONFIGURADO) return;
+    supabase.from("configuracoes").select("*").eq("id", 1).single().then(({ data }) => {
+      if (data) {
+        aplicarTema(data);
+        setLogoBase64(data.logo_base64 || null);
+        forcarAtualizacaoTema((v) => v + 1);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!SUPABASE_CONFIGURADO) { setVerificandoSessao(false); return; }
@@ -4261,10 +4409,11 @@ export default function App() {
   }, []);
 
   const sair = async () => { await supabase.auth.signOut(); setUsuarioLogado(null); };
+  const atualizarLogo = (novoLogo) => { LOGO_BASE64 = novoLogo; setLogoBase64(novoLogo); };
 
   if (verificandoSessao) {
     return <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.steel, fontFamily: "'Inter', sans-serif", fontSize: 13 }}>Carregando...</div>;
   }
-  if (!usuarioLogado) return <LoginScreen onLogin={setUsuarioLogado} />;
-  return <ControleProcessos usuarioLogado={usuarioLogado} onLogout={sair} />;
+  if (!usuarioLogado) return <LoginScreen onLogin={setUsuarioLogado} logoBase64={logoBase64} />;
+  return <ControleProcessos usuarioLogado={usuarioLogado} onLogout={sair} logoBase64={logoBase64} onLogoAtualizado={atualizarLogo} />;
 }
