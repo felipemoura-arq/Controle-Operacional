@@ -20,7 +20,7 @@ import {
    painel do Supabase → Project Settings → API → "Project URL" e
    a chave "anon public" (a chave "service_role" NUNCA vai aqui).
    ============================================================ */
-const SUPABASE_URL = "wvjznkqdmmidudwdvqqc";
+const SUPABASE_URL = "https://wvjznkqdmmidudwdvqqc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_XTxSZL05rQhMSU0cFOFxpQ_L11jLiZD";
 const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith("http");
 const supabase = createClient(
@@ -86,17 +86,37 @@ const STATUS_CONFIG = {
   aguardando: { label: "Aguardando", responsavel: "Primers", fg: COLORS.steel, bg: COLORS.grayDim, final: false, grupo: "aguardando" },
   iniciado: { label: "Iniciado", responsavel: "Primers", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "aguardando" },
   em_montagem: { label: "Em montagem", responsavel: "Primers", fg: COLORS.orange, bg: COLORS.orangeDim, final: false, grupo: "montagem" },
-  protocolado: { label: "Protocolado — aguardando análise", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
-  exigencia_primers: { label: "Em exigência — aguardando atendimento", responsavel: "Primers", fg: COLORS.orange, bg: COLORS.orangeDim, final: false, grupo: "exigencia" },
-  exigencia_cliente: { label: "Em exigência — aguardando retorno do cliente", responsavel: "Cliente", fg: COLORS.yellow, bg: COLORS.yellowDim, final: false, grupo: "exigencia" },
-  aguardando_orgao: { label: "Aguardando retorno do órgão", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
-  concluido: { label: "Concluído / Deferido", responsavel: "Finalizado", fg: COLORS.green, bg: COLORS.greenDim, final: true, grupo: "concluido" },
+  protocolado: { label: "Protocolado — aguardando análise", labelServico: "Serviço iniciado", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
+  exigencia_primers: { label: "Em exigência — aguardando atendimento", labelServico: "Pendência interna — aguardando atendimento", responsavel: "Primers", fg: COLORS.orange, bg: COLORS.orangeDim, final: false, grupo: "exigencia" },
+  exigencia_cliente: { label: "Em exigência — aguardando retorno do cliente", labelServico: "Aguardando retorno do cliente", responsavel: "Cliente", fg: COLORS.yellow, bg: COLORS.yellowDim, final: false, grupo: "exigencia" },
+  aguardando_orgao: { label: "Aguardando retorno do órgão", labelServico: "Em execução", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
+  concluido: { label: "Concluído / Deferido", labelServico: "Concluído", responsavel: "Finalizado", fg: COLORS.green, bg: COLORS.greenDim, final: true, grupo: "concluido" },
   indeferido: { label: "Indeferido", responsavel: "Finalizado", fg: "#ffb3ac", bg: COLORS.overdueDim, final: true, grupo: "indeferido" },
   cancelado: { label: "Cancelado", responsavel: "Finalizado", fg: COLORS.steel, bg: COLORS.grayDim, final: true, grupo: "cancelado" },
   suspenso: { label: "Suspenso", responsavel: "Cliente", fg: COLORS.yellow, bg: COLORS.yellowDim, final: false, grupo: "exigencia" },
 };
 const STATUS_KEYS = Object.keys(STATUS_CONFIG);
 const RESPONSAVEIS = ["Primers", "Cliente", "Órgão", "Finalizado"];
+/* Rótulo do status considerando o tipo: Serviço Técnico usa um
+   vocabulário próprio (ex: "Serviço iniciado" em vez de
+   "Protocolado", que é conceito exclusivo de Processo). */
+function statusLabel(chave, tipo) {
+  const cfg = STATUS_CONFIG[chave];
+  if (!cfg) return chave;
+  return (tipo === "Serviço Técnico" && cfg.labelServico) ? cfg.labelServico : cfg.label;
+}
+/* Compara uma data prevista com a data real e devolve se ficou
+   adiantado, no prazo ou atrasado — usado para destacar isso na
+   linha do tempo, no relatório e no status de serviço. */
+function compararPrazo(previsto, real) {
+  if (!previsto || !real) return null;
+  const dPrev = new Date(previsto + "T00:00:00");
+  const dReal = new Date(real + "T00:00:00");
+  const dias = Math.round((dReal - dPrev) / 86400000);
+  if (dias < 0) return { status: "antecipado", dias: Math.abs(dias), texto: `concluído ${Math.abs(dias)} dia(s) antes do previsto` };
+  if (dias > 0) return { status: "atrasado", dias, texto: `concluído ${dias} dia(s) após o previsto` };
+  return { status: "no_prazo", dias: 0, texto: "concluído na data prevista" };
+}
 
 const ATUALIZACAO_TIPOS = [
   "Atendimento presencial", "Atendimento online", "Comunique-se / Exigência recebida",
@@ -603,18 +623,16 @@ function gerarRelatorioHTML(processo) {
     <span class="badge ${chkPct === 100 ? "ok" : "warn"}">Checklist técnico ${chkPct}%</span>
   </p>
   ${pendencias.length > 0 ? `<h2>Pendências identificadas</h2>${pendencias.map((p) => `<div class="pend">• ${p}</div>`).join("")}` : ""}
+  <h2>Prazos das etapas</h2>
+  <table><tr><th>Etapa</th><th>Previsto</th><th>Realizado</th><th>Situação</th></tr>
+    <tr><td>Protocolo</td><td>${fmtDate(processo.dataPrevistaProtocolo)}</td><td>${fmtDate(processo.dataProtocolo)}</td><td>${calcularPrazo(processo.dataPrevistaProtocolo, processo.dataProtocolo) ? labelPrazo(calcularPrazo(processo.dataPrevistaProtocolo, processo.dataProtocolo)) : "—"}</td></tr>
+    <tr><td>Atendimento de exigência</td><td>${fmtDate(processo.dataExigenciaPrazoLimite)}</td><td>${fmtDate(processo.dataAtendimentoExigencia)}</td><td>${calcularPrazo(processo.dataExigenciaPrazoLimite, processo.dataAtendimentoExigencia) ? labelPrazo(calcularPrazo(processo.dataExigenciaPrazoLimite, processo.dataAtendimentoExigencia)) : "—"}</td></tr>
+    <tr><td>Conclusão</td><td>${fmtDate(processo.dataPrevisaoOrgao)}</td><td>${fmtDate(processo.dataConclusao)}</td><td>${calcularPrazo(processo.dataPrevisaoOrgao, processo.dataConclusao) ? labelPrazo(calcularPrazo(processo.dataPrevisaoOrgao, processo.dataConclusao)) : "—"}</td></tr>
+  </table>
   <h2>Documentos recebidos / obtidos</h2>
   <table><tr><th>Documento</th><th>Descrição</th><th>Status</th><th>Validade</th><th>Observação</th></tr>${(processo.documentos.itens || []).map(linhaDoc).join("") || `<tr><td colspan="5">Nenhum documento registrado ainda.</td></tr>`}</table>
   <h2>Checklist</h2>
   <table><tr><th>Item exigido</th><th>Status</th></tr>${(processo.checklist.itens || []).map(linhaChk).join("") || `<tr><td colspan="2">Nenhum item de checklist registrado ainda.</td></tr>`}</table>
-  <h2>Responsáveis técnicos</h2>
-  <table><tr><th>Vínculo</th><th>Nome</th><th>CPF</th><th>Registro</th><th>CCM</th><th>ART/RRT</th></tr>
-  ${processo.responsaveisTecnicos.map((r) => `<tr><td>${r.vinculo}</td><td>${r.nome}</td><td>${r.cpf}</td><td>${r.registroTipo} ${r.registroNumero}</td><td>${r.ccm}</td><td>${r.art}</td></tr>`).join("") || `<tr><td colspan="6">Nenhum responsável técnico cadastrado.</td></tr>`}
-  </table>
-  <h2>Enquadramentos especiais</h2>
-  <table><tr><th>Enquadramento</th><th>Aplica?</th><th>Observação</th></tr>
-  ${Object.entries(processo.enquadramentos).map(([k, v]) => `<tr><td>${ENQUADRAMENTOS_LABELS[k]}</td><td>${v.aplica ? "Sim" : "Não"}</td><td>${v.obs || ""}</td></tr>`).join("")}
-  </table>
   </body></html>`;
 }
 function imprimirRelatorio(processo) {
@@ -731,6 +749,85 @@ function MultiSelectDropdown({ label, options, selected, onApply, width, labelFo
 /* ============================================================
    FILTER BAR (global — usada no Dashboard e em Processos)
    ============================================================ */
+/* ============================================================
+   BOTÃO DE FILTRO ÚNICO — abre um pop-up com todos os grupos de
+   filtro daquela tela juntos, com botão "Aplicar" no final. Usado
+   em todas as telas com filtro, em vez de vários botões soltos.
+   ============================================================ */
+function BotaoFiltroPopup({ grupos }) {
+  const [open, setOpen] = useState(false);
+  const [buscaGrupo, setBuscaGrupo] = useState({});
+  const [temp, setTemp] = useState(() => grupos.map((g) => g.selected));
+
+  useEffect(() => { if (open) { setTemp(grupos.map((g) => g.selected)); setBuscaGrupo({}); } }, [open]); // eslint-disable-line
+
+  const totalAtivos = grupos.reduce((s, g) => s + g.selected.length, 0);
+  const toggle = (gi, opt) => setTemp((t) => t.map((arr, i) => (i === gi ? (arr.includes(opt) ? arr.filter((x) => x !== opt) : [...arr, opt]) : arr)));
+  const aplicar = () => { grupos.forEach((g, i) => g.onApply(temp[i])); setOpen(false); };
+  const limparTudo = () => setTemp(grupos.map(() => []));
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{
+        display: "flex", alignItems: "center", gap: 7, background: COLORS.panel, border: `1px solid ${totalAtivos ? COLORS.red + "77" : COLORS.border}`,
+        borderRadius: 8, padding: "8px 14px", color: totalAtivos ? COLORS.ice : COLORS.steelLight, fontSize: 12.5, cursor: "pointer", fontFamily: "'Inter', sans-serif",
+      }}>
+        <Filter size={13} /> Filtro
+        {totalAtivos > 0 && <span style={{ background: COLORS.red, color: "#fff", borderRadius: 999, minWidth: 18, height: 18, fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{totalAtivos}</span>}
+      </button>
+      {open && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60 }} onClick={() => setOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            position: "absolute", top: 70, left: "50%", transform: "translateX(-50%)", background: COLORS.panel, border: `1px solid ${COLORS.borderStrong}`,
+            borderRadius: 12, padding: 22, width: "min(420px, 92vw)", maxHeight: "78vh", overflowY: "auto", boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, color: COLORS.ice, textTransform: "uppercase" }}>Filtro</div>
+              <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.steel }}><X size={18} /></button>
+            </div>
+            {grupos.map((g, gi) => {
+              const busca = (buscaGrupo[gi] || "").toLowerCase();
+              const opcoesFiltradas = busca ? g.options.filter((o) => (g.labelFor ? g.labelFor(o) : o).toLowerCase().includes(busca)) : g.options;
+              return (
+                <div key={g.label} style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, marginBottom: 8 }}>{g.label}</div>
+                  {temp[gi].length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                      {temp[gi].map((v) => (
+                        <span key={v} style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.redDim, color: COLORS.red, borderRadius: 999, padding: "3px 6px 3px 10px", fontSize: 11 }}>
+                          {g.labelFor ? g.labelFor(v) : v}
+                          <button onClick={() => toggle(gi, v)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red, display: "flex" }}><X size={11} /></button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <input value={buscaGrupo[gi] || ""} onChange={(e) => setBuscaGrupo((b) => ({ ...b, [gi]: e.target.value }))} placeholder={`Buscar em ${g.label.toLowerCase()}...`}
+                    style={{ width: "100%", background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 10px", color: COLORS.ice, fontSize: 12, marginBottom: 6 }} />
+                  <div style={{ maxHeight: 130, overflowY: "auto", border: `1px solid ${COLORS.border}`, borderRadius: 6 }}>
+                    {opcoesFiltradas.length === 0 && <div style={{ padding: 10, fontSize: 11.5, color: COLORS.steel }}>Nenhuma opção.</div>}
+                    {opcoesFiltradas.map((opt) => (
+                      <label key={opt} className="row-hover" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer" }}>
+                        <input type="checkbox" checked={temp[gi].includes(opt)} onChange={() => toggle(gi, opt)} />
+                        <span style={{ fontSize: 12, color: COLORS.ice, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.labelFor ? g.labelFor(opt) : opt}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, paddingTop: 14, borderTop: `1px solid ${COLORS.border}` }}>
+              <button onClick={limparTudo} style={{ background: "transparent", border: "none", color: COLORS.steel, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>Limpar tudo</button>
+              <button onClick={aplicar} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 22px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                Aplicar filtros
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FilterBar({ processos, filtros, setFiltros }) {
   const clientes = useMemo(() => Array.from(new Set(processos.map((p) => p.cliente))).sort(), [processos]);
   const unidades = useMemo(() => {
@@ -744,13 +841,12 @@ function FilterBar({ processos, filtros, setFiltros }) {
 
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, color: COLORS.steel, fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        <Filter size={13} /> Filtros
-      </div>
-      <MultiSelectDropdown label="Clientes" options={clientes} selected={filtros.cliente} onApply={set("cliente")} />
-      <MultiSelectDropdown label="Unidades" options={unidades} selected={filtros.unidade} onApply={set("unidade")} />
-      <MultiSelectDropdown label="Tipos de serviço" options={assuntos} selected={filtros.assunto} onApply={set("assunto")} width={180} />
-      <MultiSelectDropdown label="Responsabilidade" options={RESPONSAVEIS} selected={filtros.responsavel} onApply={set("responsavel")} labelFor={rotuloResponsavel} />
+      <BotaoFiltroPopup grupos={[
+        { label: "Clientes", options: clientes, selected: filtros.cliente, onApply: set("cliente") },
+        { label: "Unidades", options: unidades, selected: filtros.unidade, onApply: set("unidade") },
+        { label: "Tipos de serviço", options: assuntos, selected: filtros.assunto, onApply: set("assunto") },
+        { label: "Responsabilidade", options: RESPONSAVEIS, selected: filtros.responsavel, onApply: set("responsavel"), labelFor: rotuloResponsavel },
+      ]} />
       {algumFiltroAtivo > 0 && (
         <button onClick={() => setFiltros({ cliente: [], unidade: [], assunto: [], responsavel: [] })}
           style={{ background: "transparent", border: "none", color: COLORS.red, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>
@@ -815,7 +911,7 @@ function NewProcessModal({ onClose, onSave, processos, isAdmin }) {
           <div style={{ gridColumn: "1 / -1" }}>{field("Assunto / Serviço", "assunto", "Ex: Aprovação de Projeto - Prefeitura (Obra Nova)")}</div>
           {selectField("Tipo de serviço", "tipo", CONTRATO_TIPO_OPTIONS)}
           {field("Nº do processo", "numero", "Ex: 1101.2025/0001")}
-          <div style={{ gridColumn: "1 / -1" }}>{selectField("Status atual (responsabilidade)", "statusAtual", STATUS_KEYS, (k) => `${STATUS_CONFIG[k].label} — ${rotuloResponsavel(STATUS_CONFIG[k].responsavel)}`)}</div>
+          <div style={{ gridColumn: "1 / -1" }}>{selectField("Status atual (responsabilidade)", "statusAtual", STATUS_KEYS, (k) => `${statusLabel(k, form.tipo)} — ${rotuloResponsavel(STATUS_CONFIG[k].responsavel)}`)}</div>
           {field("Data de protocolo", "dataProtocolo", "", "date")}
           {field("Previsão de análise do órgão", "dataPrevisaoOrgao", "", "date")}
           {field("Data de atendimento de exigência", "dataAtendimentoExigencia", "", "date")}
@@ -847,7 +943,7 @@ function NewProcessModal({ onClose, onSave, processos, isAdmin }) {
             const pendenciaCliente = form.pendenciaClienteDescricao ? { ativa: true, descricao: form.pendenciaClienteDescricao } : { ativa: false, descricao: "" };
             onSave(baseProcesso({
               ...form, id: Date.now(), pendenciaCliente, ultimaAtualizacao: new Date().toISOString().slice(0, 10),
-              valorContrato: parseFloat(form.valorContrato) || 0, dependeDeId: form.dependeDeId ? Number(form.dependeDeId) : null,
+              valorContrato: parseFloat(form.valorContrato) || 0, dependeDeId: form.dependeDeId || null,
             }));
             onClose();
           }} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", textTransform: "uppercase" }}>
@@ -936,7 +1032,7 @@ function DocumentosTab({ processo, onUpdate }) {
 
   const adicionar = () => {
     if (!novo.nome.trim()) return;
-    const item = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: novo.nome.trim(), descricao: novo.descricao.trim(), status: novo.status, validade: novo.validade || null, observacao: novo.observacao.trim() };
+    const item = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: novo.nome.trim(), descricao: novo.descricao.trim(), status: novo.status, validade: novo.validade || null, observacao: novo.observacao.trim(), criadoEm: hojeISOStr() };
     onUpdate({ ...processo, documentos: { itens: [...itens, item] } });
     setNovo({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "" });
   };
@@ -1008,57 +1104,6 @@ function DocumentosTab({ processo, onUpdate }) {
         </div>
       ))}
 
-      <div style={{ marginTop: 22, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.steelLight, textTransform: "uppercase", letterSpacing: "0.04em" }}>Responsáveis técnicos</div>
-        <button onClick={addResponsavel} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 6, padding: "5px 10px", fontSize: 11.5, cursor: "pointer" }}>
-          <Plus size={12} /> Adicionar responsável
-        </button>
-      </div>
-      {processo.responsaveisTecnicos.length === 0 && <div style={{ fontSize: 12, color: COLORS.steel, padding: "8px 0 16px" }}>Nenhum responsável técnico cadastrado.</div>}
-      {processo.responsaveisTecnicos.map((r) => (
-        <div key={r.id} style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 12, marginBottom: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <select value={r.vinculo} onChange={(e) => patchResponsavel(r.id, { vinculo: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }}>
-              {VINCULO_TIPOS.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-            <input placeholder="Nome" value={r.nome} onChange={(e) => patchResponsavel(r.id, { nome: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }} />
-            <input placeholder="CPF" value={r.cpf} onChange={(e) => patchResponsavel(r.id, { cpf: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <select value={r.registroTipo} onChange={(e) => patchResponsavel(r.id, { registroTipo: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }}>
-              {REGISTRO_TIPOS.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-            <input placeholder="Nº do registro" value={r.registroNumero} onChange={(e) => patchResponsavel(r.id, { registroNumero: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }} />
-            <input placeholder="CCM" value={r.ccm} onChange={(e) => patchResponsavel(r.id, { ccm: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }} />
-            <input placeholder="Nº da ART/RRT" value={r.art} onChange={(e) => patchResponsavel(r.id, { art: e.target.value })} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", color: COLORS.ice, fontSize: 12 }} />
-          </div>
-          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={r.carteiraAnexada} onChange={(e) => patchResponsavel(r.id, { carteiraAnexada: e.target.checked })} />
-              <span style={{ fontSize: 11.5, color: COLORS.steelLight }}>Carteira profissional anexada</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={r.artAnexada} onChange={(e) => patchResponsavel(r.id, { artAnexada: e.target.checked })} />
-              <span style={{ fontSize: 11.5, color: COLORS.steelLight }}>ART/RRT anexada</span>
-            </label>
-            <button onClick={() => removeResponsavel(r.id)} style={{ marginLeft: "auto", background: "none", border: "none", color: COLORS.red, fontSize: 11.5, cursor: "pointer" }}>Remover</button>
-          </div>
-        </div>
-      ))}
-
-      <div style={{ marginTop: 22, fontSize: 12.5, fontWeight: 700, color: COLORS.steelLight, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>Enquadramentos especiais</div>
-      {Object.entries(processo.enquadramentos).map(([k, v]) => (
-        <div key={k} style={{ padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: v.aplica ? 6 : 0 }}>
-            <input type="checkbox" checked={v.aplica} onChange={(e) => patchEnquadramento(k, { aplica: e.target.checked })} />
-            <span style={{ fontSize: 12.5, color: COLORS.ice }}>{ENQUADRAMENTOS_LABELS[k]}</span>
-          </label>
-          {v.aplica && (
-            <input value={v.obs} onChange={(e) => patchEnquadramento(k, { obs: e.target.value })} placeholder="Observação / status do enquadramento..."
-              style={{ width: "100%", background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
-          )}
-        </div>
-      ))}
     </div>
   );
 }
@@ -1335,22 +1380,58 @@ function ConcluirModal({ onClose, onSave }) {
 /* ============================================================
    LINHA DO TEMPO — eventos do serviço, do início à conclusão
    ============================================================ */
+/* Compara data prevista x data realizada de uma etapa, para destacar
+   se foi concluída adiantada, no prazo ou atrasada. */
+function calcularPrazo(previsto, realizado) {
+  if (!previsto || !realizado) return null;
+  const diffDias = Math.round((new Date(realizado) - new Date(previsto)) / 86400000);
+  if (diffDias < 0) return { status: "adiantado", dias: Math.abs(diffDias) };
+  if (diffDias > 0) return { status: "atrasado", dias: diffDias };
+  return { status: "no_prazo", dias: 0 };
+}
+function labelPrazo(p) {
+  if (!p) return null;
+  if (p.status === "adiantado") return `Adiantado (${p.dias}d)`;
+  if (p.status === "atrasado") return `Atrasado (${p.dias}d)`;
+  return "No prazo";
+}
+function corPrazo(p) {
+  if (!p) return COLORS.steel;
+  if (p.status === "adiantado") return COLORS.green;
+  if (p.status === "atrasado") return COLORS.red;
+  return COLORS.blue;
+}
+
 function eventosLinhaDoTempo(processo) {
   const eventos = [];
-  const push = (data, label, cor) => { if (data) eventos.push({ data, label, cor }); };
+  const push = (data, label, cor, prazo) => { if (data) eventos.push({ data, label, cor, prazo: prazo || null }); };
   const tecnico = processo.tipo === "Serviço Técnico";
   push(processo.dataInicio, "Serviço iniciado", COLORS.blue);
   push(processo.dataPrevisaoAnaliseChecklist, "Previsão de conclusão da análise / checklist", COLORS.steel);
-  push(processo.dataPrevistaProtocolo, tecnico ? "Data prevista de vistoria" : "Data prevista de protocolo", COLORS.steel);
-  push(processo.dataProtocolo, "Protocolado junto ao órgão", COLORS.blue);
+  if (tecnico) {
+    if (processo.vistoriaNecessaria) push(processo.dataPrevistaVistoria, "Data prevista de vistoria", COLORS.steel);
+  } else {
+    push(processo.dataPrevistaProtocolo, "Data prevista de protocolo", COLORS.steel);
+  }
+  push(processo.dataProtocolo, `Protocolado junto ao órgão${processo.numeroProtocolo && processo.numeroProtocolo !== "-" ? ` (nº ${processo.numeroProtocolo})` : ""}`,
+    COLORS.blue, calcularPrazo(processo.dataPrevistaProtocolo, processo.dataProtocolo));
   push(processo.dataPrevisaoOrgao, tecnico ? "Previsão de conclusão / entrega" : "Previsão de análise do órgão", COLORS.steel);
   push(processo.dataExigenciaRecebida, tecnico ? "Pendência registrada" : "Comunique-se / Exigência recebida", COLORS.orange);
   push(processo.dataExigenciaPrazoLimite, "Prazo limite para atendimento", COLORS.red);
   push(processo.dataAtendimentoTecnico, "Atendimento técnico realizado", COLORS.blue);
-  push(processo.dataAtendimentoExigencia, "Exigência atendida", COLORS.green);
+  push(processo.dataAtendimentoExigencia, "Exigência atendida", COLORS.green, calcularPrazo(processo.dataExigenciaPrazoLimite, processo.dataAtendimentoExigencia));
+  if (processo.dependeDeId) push(processo.dataInicio, "Dependência de outro processo registrada", COLORS.steel);
+  if (processo.pendenciaCliente && processo.pendenciaCliente.ativa) {
+    push(processo.ultimaAtualizacao || processo.dataInicio, `Pendência do cliente em aberto: ${processo.pendenciaCliente.descricao || "sem descrição"}`, COLORS.orange);
+  }
+  (processo.documentos?.itens || []).forEach((doc) => {
+    if (doc.criadoEm && processo.dataProtocolo && doc.criadoEm > processo.dataProtocolo) {
+      push(doc.criadoEm, `Documento incluído após o protocolo: ${doc.nome}`, COLORS.orange);
+    }
+  });
   (processo.cobrancas || []).forEach((c) => push(c.data, "Cobrança de celeridade ao órgão", COLORS.orange));
   (processo.atualizacoes || []).forEach((a) => push(a.data, `${a.tipo}: ${a.descricao}`, COLORS.steelLight));
-  push(processo.dataConclusao, "Concluído / Deferido", COLORS.green);
+  push(processo.dataConclusao, "Concluído / Deferido", COLORS.green, calcularPrazo(processo.dataPrevisaoOrgao, processo.dataConclusao));
   return eventos.filter((e) => e.data).sort((a, b) => a.data.localeCompare(b.data));
 }
 
@@ -1373,7 +1454,10 @@ function LinhaDoTempoTab({ processo }) {
             <div key={i} style={{ position: "relative", paddingBottom: 20 }}>
               <div style={{ position: "absolute", left: -22, top: 2, width: 11, height: 11, borderRadius: "50%", background: e.cor, border: `2px solid ${COLORS.panel}` }} />
               <div style={{ fontSize: 11, color: COLORS.steel, fontFamily: "monospace" }}>{fmtDate(e.data)}</div>
-              <div style={{ fontSize: 12.5, color: COLORS.ice, marginTop: 2, lineHeight: 1.4 }}>{e.label}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12.5, color: COLORS.ice, lineHeight: 1.4 }}>{e.label}</div>
+                {e.prazo && <Pill fg={corPrazo(e.prazo)} bg={`${corPrazo(e.prazo)}22`}>{labelPrazo(e.prazo)}</Pill>}
+              </div>
             </div>
           ))}
         </div>
@@ -1429,17 +1513,23 @@ function gerarStatusServicoHTML(processo) {
   const status = STATUS_CONFIG[processo.statusAtual];
   const atualizacoes = processo.atualizacoes.filter((a) => a.incluirRelatorio !== false).sort((a, b) => b.data.localeCompare(a.data));
   const linhas = atualizacoes.map((a) => `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo}</td><td>${rotuloResponsavel(a.responsavel)}</td><td>${a.descricao}</td></tr>`).join("");
+  const prazoProtocolo = calcularPrazo(processo.dataPrevistaProtocolo, processo.dataProtocolo);
+  const prazoConclusao = calcularPrazo(processo.dataPrevisaoOrgao, processo.dataConclusao);
+  const badgePrazo = (p) => p ? ` <span class="badge" style="background:${corPrazo(p)}22;color:${corPrazo(p)};">${labelPrazo(p)}</span>` : "";
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço — ${processo.assunto}</title><style>${printBrandCSS()}</style></head><body>
   ${brandHeader("Status de Serviço", `${processo.cliente} — ${processo.unidade} · Gerado em ${fmtDate(hojeISOStr())}`)}
   <div class="content">
     <div class="grid">
       <div class="kv">Serviço<b>${processo.assunto}</b></div>
       <div class="kv">Tipo<b>${processo.tipo}</b></div>
-      <div class="kv">Status atual<b><span class="badge" style="background:${status.bg};color:${status.fg}">${status.label}</span></b></div>
+      <div class="kv">Status atual<b><span class="badge" style="background:${status.bg};color:${status.fg}">${statusLabel(processo.statusAtual, processo.tipo)}</span></b></div>
       <div class="kv">Nº do processo<b>${processo.numero}</b></div>
-      <div class="kv">Data de protocolo<b>${fmtDate(processo.dataProtocolo)}</b></div>
+      <div class="kv">Data de protocolo<b>${fmtDate(processo.dataProtocolo)}${badgePrazo(prazoProtocolo)}</b></div>
+      <div class="kv">Nº do protocolo<b>${processo.numeroProtocolo && processo.numeroProtocolo !== "-" ? processo.numeroProtocolo : "—"}</b></div>
       <div class="kv">Previsão de análise do órgão<b>${fmtDate(processo.dataPrevisaoOrgao)}</b></div>
+      <div class="kv">Data de conclusão<b>${fmtDate(processo.dataConclusao)}${badgePrazo(prazoConclusao)}</b></div>
     </div>
+    ${processo.pendenciaCliente && processo.pendenciaCliente.ativa ? `<h2>Pendência do cliente</h2><p style="font-size:13px;color:#a3261b;">${processo.pendenciaCliente.descricao || "Pendência registrada sem descrição."}</p>` : ""}
     <h2>Histórico de atualizações</h2>
     <table><tr><th>Data</th><th>Tipo</th><th>Responsável</th><th>Descrição</th></tr>${linhas || `<tr><td colspan="4">Nenhuma atualização registrada.</td></tr>`}</table>
   </div>
@@ -1454,7 +1544,7 @@ function gerarLinhaDoTempoHTML(processo) {
     <div style="display:flex;gap:16px;margin-bottom:18px;">
       <div style="width:90px;flex-shrink:0;font-size:11.5px;color:#5b6675;font-weight:600;padding-top:2px;">${fmtDate(e.data)}</div>
       <div style="flex-shrink:0;padding-top:3px;"><div style="width:11px;height:11px;border-radius:50%;background:${e.cor};"></div></div>
-      <div style="font-size:13px;color:#16283d;line-height:1.5;">${e.label}</div>
+      <div style="font-size:13px;color:#16283d;line-height:1.5;">${e.label}${e.prazo ? ` <span class="badge" style="background:${corPrazo(e.prazo)}22;color:${corPrazo(e.prazo)};margin-left:6px;">${labelPrazo(e.prazo)}</span>` : ""}</div>
     </div>`).join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Linha do Tempo — ${processo.assunto}</title><style>${printBrandCSS()}</style></head><body>
   ${brandHeader("Linha do Tempo do Serviço", `${processo.cliente} — ${processo.unidade} · ${processo.assunto}`)}
@@ -1469,7 +1559,7 @@ function gerarStatusServicoGeralHTML(processos, tituloCliente) {
     const st = STATUS_CONFIG[p.statusAtual];
     const ultima = [...p.atualizacoes].filter((a) => a.incluirRelatorio !== false).sort((a, b) => b.data.localeCompare(a.data))[0];
     return `<tr><td>${p.cliente}</td><td>${p.unidade}</td><td>${p.assunto}</td><td>${p.tipo}</td>
-      <td><span class="badge" style="background:${st.bg};color:${st.fg}">${st.label}</span></td>
+      <td><span class="badge" style="background:${st.bg};color:${st.fg}">${statusLabel(p.statusAtual, p.tipo)}</span></td>
       <td>${fmtDate(p.ultimaAtualizacao)}</td><td>${ultima ? ultima.descricao : "—"}</td></tr>`;
   }).join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Status de Serviço${tituloCliente ? " — " + tituloCliente : ""}</title><style>${printBrandCSS()}</style></head><body>
@@ -1537,7 +1627,7 @@ function DetailModal({ processo, processos, onClose, onUpdate, onOpenProcesso, o
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
             <select value={processo.statusAtual} onChange={(e) => patch({ statusAtual: e.target.value })}
               style={{ background: status.bg, color: status.fg, border: `1px solid ${status.fg}55`, borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 700, fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em" }}>
-              {STATUS_KEYS.map((k) => <option key={k} value={k} style={{ background: COLORS.panel, color: COLORS.ice }}>{STATUS_CONFIG[k].label}</option>)}
+              {STATUS_KEYS.map((k) => <option key={k} value={k} style={{ background: COLORS.panel, color: COLORS.ice }}>{statusLabel(k, processo.tipo)}</option>)}
             </select>
             <Pill fg={COLORS.steelLight} bg="rgba(255,255,255,0.06)">{processo.tipo}</Pill>
             {iniciado && <Pill fg={prazo.fg} bg={prazo.bg}>{prazo.label}</Pill>}
@@ -1679,7 +1769,16 @@ function DetailModal({ processo, processos, onClose, onUpdate, onOpenProcesso, o
               </div>
 
               <div style={{ marginTop: 20, fontSize: 11.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600, marginBottom: 8 }}>Dependência de outro processo</div>
-              <select value={processo.dependeDeId || ""} onChange={(e) => patch({ dependeDeId: e.target.value ? Number(e.target.value) : null })}
+              <select value={processo.dependeDeId || ""} onChange={(e) => {
+                const novoId = e.target.value || null;
+                const procDependente = novoId ? processos.find((p) => p.id === novoId) : null;
+                const itensAtuais = processo.checklist.itens || [];
+                const jaTemItem = itensAtuais.some((it) => it.item.startsWith("Depende da conclusão de:"));
+                const checklist = (procDependente && !jaTemItem)
+                  ? { itens: [...itensAtuais, { id: `chk-dep-${Date.now()}`, item: `Depende da conclusão de: ${procDependente.cliente} — ${procDependente.assunto}`, status: "Não temos" }] }
+                  : processo.checklist;
+                patch({ dependeDeId: novoId, checklist });
+              }}
                 style={{ width: "100%", background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12.5 }}>
                 <option value="">Nenhuma dependência</option>
                 {processos.filter((p) => p.id !== processo.id).map((p) => <option key={p.id} value={p.id}>{p.cliente} — {p.assunto}</option>)}
@@ -2021,7 +2120,7 @@ function AtualizacoesPage({ processos, onOpenProcesso }) {
     processosFiltrados.forEach((p) => {
       const ultima = p.atualizacoes[0];
       rows.push([
-        p.cliente, p.unidade, p.assunto, STATUS_CONFIG[p.statusAtual].label, rotuloResponsavel(STATUS_CONFIG[p.statusAtual].responsavel),
+        p.cliente, p.unidade, p.assunto, statusLabel(p.statusAtual, p.tipo), rotuloResponsavel(STATUS_CONFIG[p.statusAtual].responsavel),
         fmtDate(p.dataProtocolo), fmtDate(p.dataPrevisaoOrgao), fmtDate(p.ultimaAtualizacao), ultima ? ultima.descricao : "",
       ]);
     });
@@ -2032,9 +2131,11 @@ function AtualizacoesPage({ processos, onOpenProcesso }) {
     <div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18, justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <MultiSelectDropdown label="Clientes" options={clientes} selected={filtroCliente} onApply={(v) => { setFiltroCliente(v); setPage(1); }} />
-          <MultiSelectDropdown label="Técnicos" options={TECNICOS_OPTIONS} selected={filtroTecnico} onApply={(v) => { setFiltroTecnico(v); setPage(1); }} />
-          <MultiSelectDropdown label="Tipos de atualização" options={ATUALIZACAO_TIPOS} selected={filtroTipo} onApply={(v) => { setFiltroTipo(v); setPage(1); }} width={190} />
+          <BotaoFiltroPopup grupos={[
+            { label: "Clientes", options: clientes, selected: filtroCliente, onApply: (v) => { setFiltroCliente(v); setPage(1); } },
+            { label: "Técnicos", options: TECNICOS_OPTIONS, selected: filtroTecnico, onApply: (v) => { setFiltroTecnico(v); setPage(1); } },
+            { label: "Tipos de atualização", options: ATUALIZACAO_TIPOS, selected: filtroTipo, onApply: (v) => { setFiltroTipo(v); setPage(1); } },
+          ]} />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => imprimirStatusServicoGeral(processosFiltrados, filtroCliente.length === 1 ? filtroCliente[0] : null)}
@@ -2590,6 +2691,56 @@ function GerenciarAcessosPage({ usuarioLogado, logoBase64, onLogoAtualizado }) {
   );
 }
 
+/* ============================================================
+   SELETOR DE COR ESTILO EXCEL — grade de amostras (Cores do tema
+   + Cores padrão) com opção "Mais cores..." para escolha livre.
+   ============================================================ */
+function ColorSwatchPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    function aoClicarFora(e) { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setCustomOpen(false); } }
+    document.addEventListener("mousedown", aoClicarFora);
+    return () => document.removeEventListener("mousedown", aoClicarFora);
+  }, []);
+
+  const coresTema = ["#FFFFFF", "#000000", "#8493a6", "#0a1420", "#4a90d9", "#e1483d", "#f2894b", "#3ecf8e", "#8e5fd9", "#2fb8c6"];
+  const coresPadrao = ["#c0392b", "#e1483d", "#f2894b", "#e8c547", "#8ce08c", "#3ecf8e", "#5bc8f2", "#4a90d9", "#2a4d8f", "#8e5fd9"];
+
+  const swatch = (cor) => (
+    <button key={cor} onClick={() => { onChange(cor); setOpen(false); setCustomOpen(false); }} title={cor}
+      style={{ width: 22, height: 22, borderRadius: 4, background: cor, border: value.toLowerCase() === cor.toLowerCase() ? `2px solid ${COLORS.ice}` : "1px solid rgba(255,255,255,0.15)", cursor: "pointer", padding: 0 }} />
+  );
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: COLORS.panelAlt, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, padding: "0 8px" }}>
+        <span style={{ width: 18, height: 18, borderRadius: 3, background: value, border: "1px solid rgba(255,255,255,0.2)", flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: COLORS.steelLight, fontFamily: "monospace" }}>{value}</span>
+        <ChevronDown size={12} color={COLORS.steel} style={{ marginLeft: "auto" }} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 40, background: COLORS.panel, border: `1px solid ${COLORS.borderStrong}`, borderRadius: 8, padding: 12, width: 210, boxShadow: "0 12px 28px rgba(0,0,0,0.45)" }}>
+          <div style={{ fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Cores do tema</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 5, marginBottom: 12 }}>{coresTema.map(swatch)}</div>
+          <div style={{ fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Cores padrão</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 5, marginBottom: 10 }}>{coresPadrao.map(swatch)}</div>
+          {!customOpen ? (
+            <button onClick={() => setCustomOpen(true)} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", borderTop: `1px solid ${COLORS.border}`, paddingTop: 8, color: COLORS.steelLight, fontSize: 11.5, cursor: "pointer" }}>
+              Mais cores...
+            </button>
+          ) : (
+            <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 8 }}>
+              <input type="color" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", height: 32, border: "none", background: "transparent", cursor: "pointer" }} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonalizacaoSection({ logoBase64, onLogoAtualizado }) {
   const [corPrimaria, setCorPrimaria] = useState(COLORS.red);
   const [corFundo, setCorFundo] = useState(COLORS.bg);
@@ -2678,13 +2829,13 @@ function PersonalizacaoSection({ logoBase64, onLogoAtualizado }) {
         <div style={{ fontSize: 12, color: COLORS.steelLight, marginBottom: 8 }}>Cores da interface (até 3 cores)</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
           <ModalField label="Cor de destaque">
-            <input type="color" value={corPrimaria} onChange={(e) => setCorPrimaria(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+            <ColorSwatchPicker value={corPrimaria} onChange={setCorPrimaria} />
           </ModalField>
           <ModalField label="Cor de fundo">
-            <input type="color" value={corFundo} onChange={(e) => setCorFundo(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+            <ColorSwatchPicker value={corFundo} onChange={setCorFundo} />
           </ModalField>
           <ModalField label="Cor dos painéis">
-            <input type="color" value={corPainel} onChange={(e) => setCorPainel(e.target.value)} style={{ width: "100%", height: 36, border: `1px solid ${COLORS.border}`, borderRadius: 6, background: "transparent", cursor: "pointer" }} />
+            <ColorSwatchPicker value={corPainel} onChange={setCorPainel} />
           </ModalField>
         </div>
         <button onClick={salvarCores} disabled={salvandoCores} style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
@@ -3111,7 +3262,7 @@ function ContratoDetalheCompletoModal({ proposta, cliente, unidade, contratos, p
                         {faturadas}/{g.tarefas.length} parcelas
                       </Pill>
                     </td>
-                    <td style={tdStyle}>{stProc ? <Pill fg={stProc.fg} bg={stProc.bg}>{stProc.label}</Pill> : "—"}</td>
+                    <td style={tdStyle}>{stProc ? <Pill fg={stProc.fg} bg={stProc.bg}>{statusLabel(proc.statusAtual, proc.tipo)}</Pill> : "—"}</td>
                     <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button onClick={() => setExpandido(aberto ? null : g.servico)} title="Ver tarefas"
@@ -3242,7 +3393,7 @@ function ClientesPage({ contratos, onAddContrato, isAdmin, onOpenCliente, onExcl
             <input value={busca} onChange={(e) => { setBusca(e.target.value); setPage(1); }} placeholder="Buscar cliente..."
               style={{ background: "transparent", border: "none", outline: "none", color: COLORS.ice, fontSize: 13, width: "100%" }} />
           </div>
-          <MultiSelectDropdown label="Filtrar por status do contrato" options={statusOpcoes} selected={filtroStatus} onApply={(v) => { setFiltroStatus(v); setPage(1); }} width={220} />
+          <BotaoFiltroPopup grupos={[{ label: "Status do contrato", options: statusOpcoes, selected: filtroStatus, onApply: (v) => { setFiltroStatus(v); setPage(1); } }]} />
         </div>
         {isAdmin && (
           <button onClick={() => setShowNovo(true)} style={{ display: "flex", alignItems: "center", gap: 7, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
@@ -3337,7 +3488,7 @@ function UnidadesPage({ contratos, onAddContrato, onOpenUnidade, isAdmin, onExcl
             <input value={busca} onChange={(e) => { setBusca(e.target.value); setPage(1); }} placeholder="Buscar cliente ou unidade..."
               style={{ background: "transparent", border: "none", outline: "none", color: COLORS.ice, fontSize: 13, width: "100%" }} />
           </div>
-          <MultiSelectDropdown label="Filtrar por status do contrato" options={statusOpcoes} selected={filtroStatus} onApply={(v) => { setFiltroStatus(v); setPage(1); }} width={220} />
+          <BotaoFiltroPopup grupos={[{ label: "Status do contrato", options: statusOpcoes, selected: filtroStatus, onApply: (v) => { setFiltroStatus(v); setPage(1); } }]} />
         </div>
         <button onClick={() => setShowNovo(true)} style={{ display: "flex", alignItems: "center", gap: 7, background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
           <Plus size={15} /> Nova unidade
@@ -3468,13 +3619,12 @@ function PlanejamentoFinanceiroPage({ contratos, onOpenContrato }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, color: COLORS.steel, fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          <Filter size={13} /> Filtros
-        </div>
-        <MultiSelectDropdown label="Clientes" options={clientes} selected={filtroCliente} onApply={(v) => { setFiltroCliente(v); setFiltroUnidade([]); setPage(1); }} />
-        <MultiSelectDropdown label="Unidades" options={unidades} selected={filtroUnidade} onApply={(v) => { setFiltroUnidade(v); setPage(1); }} />
-        <MultiSelectDropdown label="Contratos" options={contratosOpts} selected={filtroContrato} onApply={(v) => { setFiltroContrato(v); setPage(1); }} />
-        <MultiSelectDropdown label="Serviços" options={servicos} selected={filtroServico} onApply={(v) => { setFiltroServico(v); setPage(1); }} width={180} />
+        <BotaoFiltroPopup grupos={[
+          { label: "Clientes", options: clientes, selected: filtroCliente, onApply: (v) => { setFiltroCliente(v); setFiltroUnidade([]); setPage(1); } },
+          { label: "Unidades", options: unidades, selected: filtroUnidade, onApply: (v) => { setFiltroUnidade(v); setPage(1); } },
+          { label: "Contratos", options: contratosOpts, selected: filtroContrato, onApply: (v) => { setFiltroContrato(v); setPage(1); } },
+          { label: "Serviços", options: servicos, selected: filtroServico, onApply: (v) => { setFiltroServico(v); setPage(1); } },
+        ]} />
         <Select value={ano} onChange={(v) => { setAno(v); setPage(1); }} options={anosDisponiveis} />
         <select value={mes} onChange={(e) => { setMes(e.target.value); setPage(1); }} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "8px 10px", color: COLORS.steelLight, fontSize: 12.5, fontFamily: "'Inter', sans-serif" }}>
           {MESES_NOMES.map((nome, i) => <option key={nome} value={String(i + 1)}>{nome}</option>)}
@@ -3714,10 +3864,12 @@ function ContratosPage({ contratos, processos, onUpdateContrato, onAddContrato, 
             <input value={busca} onChange={(e) => { setBusca(e.target.value); setPage(1); }} placeholder="Buscar cliente, unidade, serviço ou proposta..."
               style={{ background: "transparent", border: "none", outline: "none", color: COLORS.ice, fontSize: 13, width: 260 }} />
           </div>
-          <MultiSelectDropdown label="Clientes" options={clientes} selected={filtroCliente} onApply={(v) => { setFiltroCliente(v); setFiltroUnidade([]); setPage(1); }} />
-          <MultiSelectDropdown label="Unidades" options={unidades} selected={filtroUnidade} onApply={(v) => { setFiltroUnidade(v); setPage(1); }} />
-          <MultiSelectDropdown label="Status do contrato" options={statusContratoOpts} selected={filtroStatusContrato} onApply={(v) => { setFiltroStatusContrato(v); setPage(1); }} />
-          <MultiSelectDropdown label="Status da parcela" options={STATUS_PARCELA_OPTIONS} selected={filtroStatusParcela} onApply={(v) => { setFiltroStatusParcela(v); setPage(1); }} />
+          <BotaoFiltroPopup grupos={[
+            { label: "Clientes", options: clientes, selected: filtroCliente, onApply: (v) => { setFiltroCliente(v); setFiltroUnidade([]); setPage(1); } },
+            { label: "Unidades", options: unidades, selected: filtroUnidade, onApply: (v) => { setFiltroUnidade(v); setPage(1); } },
+            { label: "Status do contrato", options: statusContratoOpts, selected: filtroStatusContrato, onApply: (v) => { setFiltroStatusContrato(v); setPage(1); } },
+            { label: "Status da parcela", options: STATUS_PARCELA_OPTIONS, selected: filtroStatusParcela, onApply: (v) => { setFiltroStatusParcela(v); setPage(1); } },
+          ]} />
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={exportar} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
@@ -4225,7 +4377,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
                           <td style={{ padding: "10px 18px", fontSize: 13, color: COLORS.steelLight, borderBottom: `1px solid ${COLORS.border}` }}>{p.assunto}</td>
                           <td style={{ padding: "10px 18px", fontSize: 13, borderBottom: `1px solid ${COLORS.border}` }}>{p.cliente}</td>
                           <td style={{ padding: "10px 18px", fontSize: 13, color: COLORS.steelLight, borderBottom: `1px solid ${COLORS.border}` }}>{bloqueio.assunto}</td>
-                          <td style={{ padding: "10px 18px", borderBottom: `1px solid ${COLORS.border}` }}><Pill fg={stB.fg} bg={stB.bg}>{stB.label}</Pill></td>
+                          <td style={{ padding: "10px 18px", borderBottom: `1px solid ${COLORS.border}` }}><Pill fg={stB.fg} bg={stB.bg}>{statusLabel(bloqueio.statusAtual, bloqueio.tipo)}</Pill></td>
                         </tr>
                       );
                     })}
@@ -4245,7 +4397,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
                       <tr key={p.id} className="row-hover" style={{ cursor: "pointer" }} onClick={() => setSelected(p)}>
                         <td style={{ padding: "10px 18px", fontSize: 13, borderBottom: `1px solid ${COLORS.border}` }}>{p.cliente}</td>
                         <td style={{ padding: "10px 18px", fontSize: 13, color: COLORS.steelLight, borderBottom: `1px solid ${COLORS.border}` }}>{p.assunto}</td>
-                        <td style={{ padding: "10px 18px", borderBottom: `1px solid ${COLORS.border}` }}><Pill fg={st.fg} bg={st.bg}>{st.label}</Pill></td>
+                        <td style={{ padding: "10px 18px", borderBottom: `1px solid ${COLORS.border}` }}><Pill fg={st.fg} bg={st.bg}>{statusLabel(p.statusAtual, p.tipo)}</Pill></td>
                         <td style={{ padding: "10px 18px", borderBottom: `1px solid ${COLORS.border}` }}><Pill fg={prazo.fg} bg={prazo.bg}>{prazo.label}</Pill></td>
                         <td style={{ padding: "10px 18px", fontSize: 13, color: COLORS.steel, borderBottom: `1px solid ${COLORS.border}` }}>{p.tecnico || "—"}</td>
                       </tr>
@@ -4302,7 +4454,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
                           <td style={{ padding: "11px 16px", fontSize: 12, color: COLORS.steel, borderBottom: `1px solid ${COLORS.border}`, fontFamily: "monospace" }}>{p.numero}</td>
                           <td style={{ padding: "11px 16px", borderBottom: `1px solid ${COLORS.border}` }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <Pill fg={st.fg} bg={st.bg} stamp>{st.label}</Pill>
+                              <Pill fg={st.fg} bg={st.bg} stamp>{statusLabel(p.statusAtual, p.tipo)}</Pill>
                               {aguardandoInicioRow && <span title="Lembrete: iniciar serviço" style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.red, display: "inline-block" }} />}
                             </div>
                           </td>
@@ -4339,7 +4491,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
       </div>
 
       <footer style={{ borderTop: `1px solid ${COLORS.border}`, background: COLORS.panel, padding: "10px 28px", textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 11.5, color: COLORS.steelLight, fontWeight: 600 }}>Supervisor - Felipe Moura</div>
+        <div style={{ fontSize: 11.5, color: COLORS.steelLight, fontWeight: 600 }}>Supervisor - {NOME_RESPONSAVEL}</div>
         <div style={{ fontSize: 10.5, color: COLORS.steel, marginTop: 2, letterSpacing: "0.03em" }}>Controle Operacional e Financeiro</div>
       </footer>
 
