@@ -84,11 +84,12 @@ function aplicarTema(cfg) {
    ============================================================ */
 const STATUS_CONFIG = {
   aguardando: { label: "Aguardando", responsavel: "Primers", fg: COLORS.steel, bg: COLORS.grayDim, final: false, grupo: "aguardando" },
-  iniciado: { label: "Iniciado", responsavel: "Primers", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "aguardando" },
+  iniciado: { label: "Iniciado", responsavel: "Primers", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "iniciado" },
   em_montagem: { label: "Em montagem", responsavel: "Primers", fg: COLORS.orange, bg: COLORS.orangeDim, final: false, grupo: "montagem" },
   protocolado: { label: "Protocolado — aguardando análise", labelServico: "Serviço iniciado", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
   exigencia_primers: { label: "Em exigência — aguardando atendimento", labelServico: "Pendência interna — aguardando atendimento", responsavel: "Primers", fg: COLORS.orange, bg: COLORS.orangeDim, final: false, grupo: "exigencia" },
   exigencia_cliente: { label: "Em exigência — aguardando retorno do cliente", labelServico: "Aguardando retorno do cliente", responsavel: "Cliente", fg: COLORS.yellow, bg: COLORS.yellowDim, final: false, grupo: "exigencia" },
+  exigencia_atendida: { label: "Exigência atendida — Aguardando análise", labelServico: "Exigência atendida — em análise", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
   aguardando_orgao: { label: "Aguardando retorno do órgão", labelServico: "Em execução", responsavel: "Órgão", fg: COLORS.blue, bg: COLORS.blueDim, final: false, grupo: "analise" },
   concluido: { label: "Concluído / Deferido", labelServico: "Concluído", responsavel: "Finalizado", fg: COLORS.green, bg: COLORS.greenDim, final: true, grupo: "concluido" },
   indeferido: { label: "Indeferido", responsavel: "Finalizado", fg: "#ffb3ac", bg: COLORS.overdueDim, final: true, grupo: "indeferido" },
@@ -1038,13 +1039,21 @@ function ChecklistTab({ processo, onUpdate }) {
 function DocumentosTab({ processo, onUpdate }) {
   const itens = processo.documentos.itens || [];
   const progresso = documentosProgress(processo.documentos);
-  const [novo, setNovo] = useState({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "" });
+  const [novo, setNovo] = useState({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "", enviarChecklist: true });
 
   const adicionar = () => {
     if (!novo.nome.trim()) return;
     const item = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: novo.nome.trim(), descricao: novo.descricao.trim(), status: novo.status, validade: novo.validade || null, observacao: novo.observacao.trim(), criadoEm: hojeISOStr() };
-    onUpdate({ ...processo, documentos: { itens: [...itens, item] } });
-    setNovo({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "" });
+    let checklist = processo.checklist;
+    if (novo.enviarChecklist) {
+      const itensChecklist = processo.checklist.itens || [];
+      const jaExiste = itensChecklist.some((it) => it.item.trim().toLowerCase() === item.nome.trim().toLowerCase());
+      if (!jaExiste) {
+        checklist = { itens: [...itensChecklist, { id: `chk-doc-${item.id}`, item: item.nome, status: "Não temos" }] };
+      }
+    }
+    onUpdate({ ...processo, documentos: { itens: [...itens, item] }, checklist });
+    setNovo({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "", enviarChecklist: true });
   };
   const patchItem = (id, fields) => onUpdate({ ...processo, documentos: { itens: itens.map((it) => (it.id === id ? { ...it, ...fields } : it)) } });
   const remover = (id) => onUpdate({ ...processo, documentos: { itens: itens.filter((it) => it.id !== id) } });
@@ -1080,6 +1089,10 @@ function DocumentosTab({ processo, onUpdate }) {
             {STATUS_DOC_OPCOES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8, cursor: "pointer" }}>
+          <input type="checkbox" checked={novo.enviarChecklist} onChange={(e) => setNovo((n) => ({ ...n, enviarChecklist: e.target.checked }))} />
+          <span style={{ fontSize: 11.5, color: COLORS.steelLight }}>Incluir automaticamente este documento no Checklist</span>
+        </label>
         <div style={{ display: "grid", gridTemplateColumns: "0.6fr 1fr auto", gap: 8 }}>
           <input type="date" value={novo.validade} onChange={(e) => setNovo((n) => ({ ...n, validade: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
           <input placeholder="Observação" value={novo.observacao} onChange={(e) => setNovo((n) => ({ ...n, observacao: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
@@ -1323,13 +1336,15 @@ function nextActionConfig(processo) {
         titulo: "Registrar protocolo", textoBotao: "Registrar protocolo",
         campos: [
           { key: "dataProtocolo", label: "Data de protocolo", type: "date", default: hojeISOStr() },
+          { key: "numeroProtocolo", label: "Número do protocolo", type: "text" },
           { key: "dataPrevisaoOrgao", label: "Previsão de análise do órgão", type: "date" },
         ],
         aplicar: (v) => ({ statusAtual: "protocolado", ...v }),
-        resumo: (v) => `Processo protocolado${v.dataProtocolo ? ` em ${fmtDate(v.dataProtocolo)}` : ""}.`,
+        resumo: (v) => `Processo protocolado${v.dataProtocolo ? ` em ${fmtDate(v.dataProtocolo)}` : ""}${v.numeroProtocolo ? ` (nº ${v.numeroProtocolo})` : ""}.`,
       };
     case "protocolado":
     case "aguardando_orgao":
+    case "exigencia_atendida":
       return {
         titulo: tecnico ? "Registrar pendência ou ajuste" : "Registrar Comunique-se / Exigência",
         textoBotao: tecnico ? "Registrar pendência" : "Registrar exigência recebida",
@@ -1347,9 +1362,10 @@ function nextActionConfig(processo) {
         campos: [
           { key: "dataAtendimentoTecnico", label: "Data de atendimento técnico (esclarecimentos)", type: "date" },
           { key: "dataAtendimentoExigencia", label: "Data em que foi atendida", type: "date", default: hojeISOStr() },
+          { key: "dataPrevisaoOrgao", label: "Nova previsão de análise do órgão", type: "date" },
         ],
-        aplicar: (v) => ({ statusAtual: "protocolado", ...v }),
-        resumo: () => "Exigência atendida — processo volta a Protocolado / aguardando análise.",
+        aplicar: (v) => ({ statusAtual: "exigencia_atendida", ...v }),
+        resumo: () => "Exigência atendida — processo passa para Exigência atendida / Aguardando análise.",
       };
     default:
       return null;
@@ -1699,7 +1715,7 @@ function DetailModal({ processo, processos, contratos, onClose, onUpdate, onOpen
             <div style={{ display: "flex", gap: 4, marginTop: 14, flexWrap: "wrap" }}>
               {[
                 ["geral", "Visão geral", Building2],
-                ["documentos", "Documentos", FileStack],
+                ["documentos", "Documentos Recebidos", FileStack],
                 ["checklist", "Checklist", ClipboardCheck],
                 ["linhadotempo", "Linha do tempo", Timer],
                 ["atualizacoes", `Status de Serviço (${processo.atualizacoes.length})`, History],
@@ -2346,13 +2362,14 @@ function parseContratosSheet(rows) {
   return out;
 }
 
-const STATUS_PARCELA_OPTIONS = ["Concluído / Não faturado", "Em andamento", "Faturado", "Suspenso"];
+const STATUS_PARCELA_OPTIONS = ["Pendente", "Em andamento", "Concluído / Não faturado", "Faturado", "Suspenso"];
 function normalizeStatusParcela(raw) {
   const s = String(raw || "").trim().toLowerCase();
   if (s === "invoice" || s === "faturado" || s === "pago") return "Faturado";
   if (s === "em progresso" || s === "em andamento" || s === "andamento") return "Em andamento";
   if (s === "suspenso") return "Suspenso";
-  return "Concluído / Não faturado";
+  if (s === "concluído" || s === "concluido" || s === "concluído / não faturado" || s === "concluido / nao faturado") return "Concluído / Não faturado";
+  return "Pendente";
 }
 const CONTRATO_TIPO_OPTIONS = ["Processo", "Serviço Técnico"];
 const TECNICOS_OPTIONS = ["Felipe Moura", "Janayna"];
@@ -2585,6 +2602,89 @@ function Pagination({ page, setPage, pageSize, setPageSize, totalItems }) {
    IMPORTAR NOVOS CLIENTES / CONTRATOS — página dedicada
    (único lugar onde a planilha de contratos é enviada)
    ============================================================ */
+/* ============================================================
+   FINANCEIRO — lista automaticamente todo serviço com a parcela
+   "Concluído / Não faturado", pronto para faturar. Cada linha abre
+   um pop-up próprio para registrar a data de faturamento; ao
+   gravar, a parcela passa sozinha para "Faturado".
+   ============================================================ */
+function RegistrarFaturamentoModal({ contrato, onClose, onSave }) {
+  const [data, setData] = useState(hojeISOStr());
+  return (
+    <ModalShell title="Registrar faturamento" onClose={onClose} maxWidth={420}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: COLORS.ice }}>{contrato.servico}</div>
+        <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{contrato.cliente} · {contrato.unidade} · {contrato.tarefa}</div>
+        <div style={{ fontSize: 12.5, color: COLORS.steelLight, marginTop: 8 }}>Valor da parcela: <b style={{ color: COLORS.ice }}>{fmtBRL(contrato.valorFaturamento)}</b></div>
+      </div>
+      <ModalField label="Data de faturamento">
+        <input type="date" value={data} onChange={(e) => setData(e.target.value)} style={modalInputStyle} />
+      </ModalField>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+        <button onClick={() => { onSave({ statusParcela: "Faturado", dataFaturamento: data }); onClose(); }}
+          style={{ background: COLORS.green, border: "none", color: "#0a1420", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+          Gravar
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function FinanceiroPage({ contratos, onUpdateContrato, isAdmin }) {
+  const [selecionado, setSelecionado] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const pendentesFaturar = useMemo(() => contratos.filter((c) => c.statusParcela === "Concluído / Não faturado"), [contratos]);
+  const paginados = useMemo(() => paginate(pendentesFaturar, page, pageSize), [pendentesFaturar, page, pageSize]);
+  const valorTotal = pendentesFaturar.reduce((s, c) => s + (c.valorFaturamento || 0), 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+        <KpiCard icon={ClipboardCheck} label="Pronto para faturar" value={pendentesFaturar.length} accent={COLORS.orange} sub="serviços concluídos, aguardando faturamento" />
+        <KpiCard icon={DollarSign} label="Valor total a faturar" value={isAdmin ? fmtBRL(valorTotal) : "••••••"} accent={COLORS.green} sub="soma das parcelas concluídas" />
+      </div>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table>
+            <thead><tr>{["Cliente / Unidade", "Serviço", "Tarefa", "Técnico", "Valor", "Data SLA", ""].map((h) => (
+              <th key={h} style={{ textAlign: "left", padding: "10px 16px", fontSize: 10.5, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: `1px solid ${COLORS.border}`, whiteSpace: "nowrap" }}>{h}</th>
+            ))}</tr></thead>
+            <tbody>
+              {paginados.map((c) => (
+                <tr key={c.id} className="row-hover" style={{ cursor: "pointer", borderBottom: `1px solid ${COLORS.border}` }} onClick={() => setSelecionado(c)}>
+                  <td style={{ padding: "11px 16px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.ice }}>{c.cliente}</div>
+                    <div style={{ fontSize: 11, color: COLORS.steel }}>{c.unidade}</div>
+                  </td>
+                  <td style={{ padding: "11px 16px", fontSize: 12.5, color: COLORS.steelLight, maxWidth: 220 }}>{c.servico}</td>
+                  <td style={{ padding: "11px 16px", fontSize: 12, color: COLORS.steel }}>{c.tarefa}</td>
+                  <td style={{ padding: "11px 16px", fontSize: 12, color: COLORS.steelLight }}>{c.tecnico}</td>
+                  <td style={{ padding: "11px 16px", fontSize: 12.5, color: COLORS.steelLight, whiteSpace: "nowrap" }}>{isAdmin ? fmtBRL(c.valorFaturamento) : "••••••"}</td>
+                  <td style={{ padding: "11px 16px", fontSize: 12, color: COLORS.steel }}>{fmtDate(c.dataSLA)}</td>
+                  <td style={{ padding: "11px 16px" }}>
+                    <button onClick={(e) => { e.stopPropagation(); setSelecionado(c); }} style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.red, border: "none", color: "#fff", borderRadius: 6, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <DollarSign size={12} /> Faturar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {pendentesFaturar.length === 0 && <tr><td colSpan={7} style={{ padding: 40, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum serviço aguardando faturamento no momento.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalItems={pendentesFaturar.length} />
+      </div>
+      {selecionado && (
+        <RegistrarFaturamentoModal contrato={selecionado} onClose={() => setSelecionado(null)}
+          onSave={(fields) => onUpdateContrato(selecionado.id, fields)} />
+      )}
+    </div>
+  );
+}
+
 function ImportarClientesContratosPage({ onImport }) {
   const [status, setStatus] = useState(null);
   const [confirmado, setConfirmado] = useState(false);
@@ -2909,7 +3009,7 @@ function RankingTecnicosPage({ contratos, processos, eventos }) {
    equipe, para orientar prioridades de evolução do sistema.
    ============================================================ */
 const TELA_LABELS = {
-  "dashboard-processos": "Dashboard · Processos",
+  "dashboard-processos": "Dashboard · Processos / Serviços",
   "dashboard-financeiro": "Planejamento Financeiro",
   "clientes": "Clientes",
   "unidades": "Unidades de clientes",
@@ -3357,7 +3457,7 @@ function NovoClienteModal({ onClose, onSave }) {
       </p>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
         <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-        <button onClick={() => { if (!cliente.trim()) return; onSave(novaLinhaContrato({ cliente: cliente.trim(), servico: "Cadastro manual (sem contrato ainda)", statusContrato: "-", statusServico: "-", statusParcela: "Concluído / Não faturado" })); onClose(); }}
+        <button onClick={() => { if (!cliente.trim()) return; onSave(novaLinhaContrato({ cliente: cliente.trim(), servico: "Cadastro manual (sem contrato ainda)", statusContrato: "-", statusServico: "-", statusParcela: "Pendente" })); onClose(); }}
           style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", textTransform: "uppercase" }}>
           Salvar cliente
         </button>
@@ -3382,7 +3482,7 @@ function NovaUnidadeModal({ onClose, onSave, clientesExistentes }) {
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
         <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.steelLight, borderRadius: 7, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-        <button onClick={() => { if (!cliente.trim() || !unidade.trim()) return; onSave(novaLinhaContrato({ cliente: cliente.trim(), unidade: unidade.trim(), servico: "Cadastro manual (sem contrato ainda)", statusContrato: "-", statusServico: "-", statusParcela: "Concluído / Não faturado" })); onClose(); }}
+        <button onClick={() => { if (!cliente.trim() || !unidade.trim()) return; onSave(novaLinhaContrato({ cliente: cliente.trim(), unidade: unidade.trim(), servico: "Cadastro manual (sem contrato ainda)", statusContrato: "-", statusServico: "-", statusParcela: "Pendente" })); onClose(); }}
           style={{ background: COLORS.red, border: "none", color: "#fff", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", textTransform: "uppercase" }}>
           Salvar unidade
         </button>
@@ -3495,7 +3595,7 @@ function RowEditavel({ label, tipo, valor, onConfirmar, largura }) {
 function ContratoFormModal({ title, submitLabel, initial, onClose, onSubmit, clientesExistentes, isAdmin }) {
   const [f, setF] = useState({
     proposta: "", cliente: "", unidade: "", codigoLoja: "", servico: "", tarefa: "", tecnico: "", coordenador: "",
-    tipo: "Processo", honorarios: "", valorFaturamento: "", porcentagemPct: "100", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "",
+    tipo: "Processo", honorarios: "", valorFaturamento: "", porcentagemPct: "100", dataSLA: "", statusParcela: "Pendente", observacao: "",
     ...initial,
   });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -3702,7 +3802,7 @@ function ServicoUnicoModal({ proposta, cliente, unidade, servico, contratos, pro
 
       {servicoParaTarefa && (
         <ContratoFormModal title={`Adicionar tarefa — ${servico}`} submitLabel="Adicionar tarefa" isAdmin={isAdmin}
-          initial={{ proposta, cliente, unidade, tipo, servico, tecnico, tarefa: "", honorarios: String(honorarios || ""), valorFaturamento: "", porcentagemPct: "", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "" }}
+          initial={{ proposta, cliente, unidade, tipo, servico, tecnico, tarefa: "", honorarios: String(honorarios || ""), valorFaturamento: "", porcentagemPct: "", dataSLA: "", statusParcela: "Pendente", observacao: "" }}
           onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setServicoParaTarefa(false)} clientesExistentes={clientesExistentes} />
       )}
       {confirmDeleteTarefa && (
@@ -3847,12 +3947,12 @@ function ContratoDetalheCompletoModal({ proposta, cliente, unidade, contratos, p
 
       {showAdicionarServico && (
         <ContratoFormModal title={`Adicionar serviço — contrato ${proposta}`} submitLabel="Adicionar serviço" isAdmin={isAdmin}
-          initial={{ proposta, cliente, unidade, tipo: "Processo", servico: "", tarefa: "", honorarios: "", valorFaturamento: "", porcentagemPct: "100", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "" }}
+          initial={{ proposta, cliente, unidade, tipo: "Processo", servico: "", tarefa: "", honorarios: "", valorFaturamento: "", porcentagemPct: "100", dataSLA: "", statusParcela: "Pendente", observacao: "" }}
           onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setShowAdicionarServico(false)} clientesExistentes={clientesExistentes} />
       )}
       {servicoParaTarefa && (
         <ContratoFormModal title={`Adicionar tarefa — ${servicoParaTarefa.servico}`} submitLabel="Adicionar tarefa" isAdmin={isAdmin}
-          initial={{ proposta, cliente, unidade, tipo: servicoParaTarefa.tipo || "Processo", servico: servicoParaTarefa.servico, tecnico: servicoParaTarefa.tecnico, tarefa: "", honorarios: String(servicoParaTarefa.honorarios || ""), valorFaturamento: "", porcentagemPct: "", dataSLA: "", statusParcela: "Concluído / Não faturado", observacao: "" }}
+          initial={{ proposta, cliente, unidade, tipo: servicoParaTarefa.tipo || "Processo", servico: servicoParaTarefa.servico, tecnico: servicoParaTarefa.tecnico, tarefa: "", honorarios: String(servicoParaTarefa.honorarios || ""), valorFaturamento: "", porcentagemPct: "", dataSLA: "", statusParcela: "Pendente", observacao: "" }}
           onSubmit={(fields) => onAddContrato(novaLinhaContrato(fields))} onClose={() => setServicoParaTarefa(null)} clientesExistentes={clientesExistentes} />
       )}
       {confirmDeleteServico && (
@@ -4641,10 +4741,21 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
   const [processosPageSize, setProcessosPageSize] = useState(10);
   useEffect(() => { setProcessosPage(1); }, [busca, filtros]);
   const isDashboard = tab === "dashboard-processos" || tab === "dashboard-financeiro";
-  const isClientes = tab === "clientes" || tab === "unidades" || tab === "contratos" || tab === "importar-contratos";
+  const isClientes = tab === "clientes" || tab === "unidades" || tab === "contratos" || tab === "importar-contratos" || tab === "financeiro";
   const updateProcesso = (novo) => {
+    const anterior = processos.find((p) => p.id === novo.id);
     setProcessos((prev) => prev.map((p) => (p.id === novo.id ? novo : p)));
     supabase.from("processos").update(processoToRow(novo)).eq("id", novo.id).then(() => {});
+    // Ao iniciar o serviço, as parcelas "Pendente" desse serviço passam para "Em andamento"
+    if (anterior && anterior.statusAtual === "aguardando" && novo.statusAtual !== "aguardando") {
+      setContratos((prev) => {
+        const afetadas = prev.filter((c) => c.numeroContrato === novo.numeroContrato && c.cliente === novo.cliente && c.unidade === novo.unidade && c.servico === novo.assunto && c.statusParcela === "Pendente");
+        if (!afetadas.length) return prev;
+        const ids = afetadas.map((c) => c.id);
+        supabase.from("contratos").update({ status_parcela: "Em andamento" }).in("id", ids).then(() => {});
+        return prev.map((c) => (ids.includes(c.id) ? { ...c, statusParcela: "Em andamento" } : c));
+      });
+    }
   };
   const concluirProcesso = (novo) => {
     updateProcesso(novo);
@@ -4702,8 +4813,23 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
   const tecnicos = filtrados.filter((p) => p.tipo === "Serviço Técnico").length;
   const emAnalise = filtrados.filter((p) => STATUS_CONFIG[p.statusAtual].grupo === "analise").length;
   const emExigencia = filtrados.filter((p) => STATUS_CONFIG[p.statusAtual].grupo === "exigencia").length;
-  const aguardandoInicio = filtrados.filter((p) => STATUS_CONFIG[p.statusAtual].grupo === "aguardando").length;
+  const aguardandoInicio = filtrados.filter((p) => p.statusAtual === "aguardando").length;
+  const concluidos = filtrados.filter((p) => p.statusAtual === "concluido").length;
   const indeferidos = filtrados.filter((p) => STATUS_CONFIG[p.statusAtual].grupo === "indeferido").length;
+
+  const porTecnico = useMemo(() => {
+    const map = {};
+    TECNICOS_OPTIONS.forEach((t) => { map[t] = { tecnico: t, total: 0, concluidos: 0, emAndamento: 0, emExigencia: 0 }; });
+    filtrados.forEach((p) => {
+      const chave = TECNICOS_OPTIONS.includes(p.tecnico) ? p.tecnico : "Sem técnico";
+      if (!map[chave]) map[chave] = { tecnico: chave, total: 0, concluidos: 0, emAndamento: 0, emExigencia: 0 };
+      map[chave].total++;
+      if (p.statusAtual === "concluido") map[chave].concluidos++;
+      else if (STATUS_CONFIG[p.statusAtual].grupo === "exigencia") map[chave].emExigencia++;
+      else if (p.statusAtual !== "aguardando") map[chave].emAndamento++;
+    });
+    return Object.values(map).filter((t) => t.total > 0);
+  }, [filtrados]);
 
   const bloqueados = useMemo(() => filtrados.map((p) => ({ p, bloqueio: processoBloqueado(p, processos) })).filter((x) => x.bloqueio), [filtrados, processos]);
 
@@ -4770,6 +4896,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
                 { id: "clientes", label: "Clientes", icon: Building2 },
                 { id: "unidades", label: "Unidades de clientes", icon: FileStack },
                 { id: "contratos", label: "Contratos", icon: FileSignature },
+                ...(isAdmin ? [{ id: "financeiro", label: "Financeiro", icon: DollarSign }] : []),
                 ...(isAdmin ? [{ id: "importar-contratos", label: "Importar novos clientes/contratos", icon: Upload }] : []),
               ].map((item) => (
                 <div key={item.id} className="nav-item" onClick={() => setTab(item.id)} style={{
@@ -4792,7 +4919,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
           {dashboardOpen && (
             <div style={{ display: "flex", flexDirection: "column", gap: 2, marginLeft: 14, marginBottom: 4 }}>
               {[
-                { id: "dashboard-processos", label: "Processos", icon: FileStack },
+                { id: "dashboard-processos", label: "Processos / Serviços", icon: FileStack },
                 { id: "dashboard-financeiro", label: "Planejamento Financeiro", icon: DollarSign },
               ].map((item) => (
                 <div key={item.id} className="nav-item" onClick={() => setTab(item.id)} style={{
@@ -4835,11 +4962,12 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600, color: COLORS.ice, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-              {tab === "dashboard-processos" && "Dashboard · Processos"}
+              {tab === "dashboard-processos" && "Dashboard · Processos / Serviços"}
               {tab === "dashboard-financeiro" && "Dashboard · Planejamento Financeiro"}
               {tab === "clientes" && "Clientes"}
               {tab === "unidades" && "Unidades de clientes"}
               {tab === "contratos" && "Contratos"}
+              {tab === "financeiro" && "Financeiro"}
               {tab === "importar-contratos" && "Importar novos clientes/contratos"}
               {tab === "processos" && "Controle de Processos"}
               {tab === "atualizacoes" && "Relatório de Status"}
@@ -4853,6 +4981,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
               {tab === "clientes" && "Clientes reconhecidos a partir dos contratos importados"}
               {tab === "unidades" && "Unidades reconhecidas a partir dos contratos importados"}
               {tab === "contratos" && `${contratos.length} linha(s) de contrato importada(s)`}
+              {tab === "financeiro" && "Serviços concluídos aguardando registro de faturamento"}
               {tab === "importar-contratos" && "Envie a planilha para atualizar clientes, unidades e contratos"}
               {tab === "processos" && `${buscados.length} de ${processos.length} processo(s)`}
               {tab === "atualizacoes" && "Atualizações marcadas para aparecer no relatório, registradas em Controle de Processos"}
@@ -4889,7 +5018,26 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
               <KpiCard icon={Clock} label="Aguardando início" value={aguardandoInicio} accent={COLORS.steel} sub="importados, ainda não iniciados" />
               <KpiCard icon={Search} label="Em análise" value={emAnalise} accent={COLORS.blue} sub="protocolado / aguardando órgão" />
               <KpiCard icon={AlertTriangle} label="Em exigência" value={emExigencia} accent={COLORS.orange} sub={`${NOME_RESPONSAVEL} ou cliente`} />
+              <KpiCard icon={CheckCircle2} label="Concluídos / Deferidos" value={concluidos} accent={COLORS.green} sub="finalizados com sucesso" />
               <KpiCard icon={XCircle} label="Indeferidos" value={indeferidos} accent={COLORS.overdue} sub="negados pelo órgão" />
+            </div>
+
+            <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 18, marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: 14 }}>Por técnico</div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {porTecnico.map((t) => (
+                  <div key={t.tecnico} style={{ flex: "1 1 200px", background: COLORS.panelAlt, borderRadius: 8, padding: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.ice, marginBottom: 8 }}>{t.tecnico}</div>
+                    <div style={{ display: "flex", gap: 14, fontSize: 12 }}>
+                      <div><div style={{ color: COLORS.steel, fontSize: 10 }}>Total</div><div style={{ color: COLORS.ice, fontWeight: 700, fontSize: 16 }}>{t.total}</div></div>
+                      <div><div style={{ color: COLORS.steel, fontSize: 10 }}>Em andamento</div><div style={{ color: COLORS.blue, fontWeight: 700, fontSize: 16 }}>{t.emAndamento}</div></div>
+                      <div><div style={{ color: COLORS.steel, fontSize: 10 }}>Exigência</div><div style={{ color: COLORS.orange, fontWeight: 700, fontSize: 16 }}>{t.emExigencia}</div></div>
+                      <div><div style={{ color: COLORS.steel, fontSize: 10 }}>Concluídos</div><div style={{ color: COLORS.green, fontWeight: 700, fontSize: 16 }}>{t.concluidos}</div></div>
+                    </div>
+                  </div>
+                ))}
+                {porTecnico.length === 0 && <div style={{ fontSize: 12, color: COLORS.steel }}>Nenhum processo com técnico indicado no filtro atual.</div>}
+              </div>
             </div>
 
             <AgendaSemanal processos={filtrados} agendaItens={agendaItens} onOpenProcesso={(p) => setSelected(p)} onAddItem={addAgendaItem} onRemoveItem={removeAgendaItem} />
@@ -5055,6 +5203,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
         {tab === "clientes" && <ClientesPage contratos={contratos} onAddContrato={(row) => addContratoManual(row, false)} isAdmin={isAdmin} onOpenCliente={abrirPopupCliente} onExcluirClientes={excluirClientes} />}
         {tab === "unidades" && <UnidadesPage contratos={contratos} onAddContrato={(row) => addContratoManual(row, false)} onOpenUnidade={abrirPopupUnidade} isAdmin={isAdmin} onExcluirUnidades={excluirUnidades} />}
         {tab === "contratos" && <ContratosPage contratos={contratos} processos={processos} onUpdateContrato={updateContrato} onAddContrato={(row) => addContratoManual(row, true)} onExcluirContratos={excluirContratosEmCascata} isAdmin={isAdmin} onOpenContrato={abrirPopupContrato} onOpenServico={abrirPopupServico} />}
+        {tab === "financeiro" && isAdmin && <FinanceiroPage contratos={contratos} onUpdateContrato={updateContrato} isAdmin={isAdmin} />}
         {tab === "importar-contratos" && isAdmin && <ImportarClientesContratosPage onImport={importarContratosPersistindo} />}
 
         {tab === "atualizacoes" && <AtualizacoesPage processos={processos} onOpenProcesso={(p) => setSelected(p)} />}
