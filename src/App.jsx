@@ -2520,9 +2520,27 @@ function mergeContratosIntoProcessos(processosAtuais, novasLinhas) {
 /* Quando um processo é concluído/deferido, a(s) parcela(s) do contrato
    vinculado passam para "Concluído / Não faturado" (nunca rebaixa uma
    parcela que já esteja Faturada). */
-function sincronizarParcelasNaConclusao(processo, contratosAtuais) {
+/* Sincroniza o status das parcelas em Contratos conforme o processo avança:
+   - Ao sair de "aguardando": Sinal (se pendente) conclui na hora; as demais
+     parcelas pendentes desse serviço entram em "Em andamento".
+   - Ao chegar em "protocolado": a parcela de Protocolo conclui.
+   - Ao chegar em "concluido": todas as parcelas desse serviço que ainda não
+     foram faturadas (Deferimento, Entrega, Obtenção, Conclusão, etc.) concluem.
+   Comparação por cliente/unidade/serviço normalizados (sem diferenciar
+   maiúsculas/espaços), para não depender do número do contrato bater exato. */
+function sincronizarParcelasComProcesso(processo, contratosAtuais) {
+  const norm = (s) => (s || "").trim().toLowerCase();
+  const doServico = (c) => norm(c.cliente) === norm(processo.cliente) && norm(c.unidade) === norm(processo.unidade) && norm(c.servico) === norm(processo.assunto);
   return contratosAtuais.map((c) => {
-    if (c.proposta === processo.numeroContrato && c.cliente === processo.cliente && c.unidade === processo.unidade && c.servico === processo.assunto && c.statusParcela !== "Faturado") {
+    if (!doServico(c)) return c;
+    if (processo.statusAtual === "aguardando") return c;
+    if (processo.statusAtual === "concluido") {
+      return c.statusParcela === "Faturado" ? c : { ...c, statusParcela: "Concluído / Não faturado" };
+    }
+    if (c.statusParcela === "Pendente") {
+      return { ...c, statusParcela: /sinal/i.test(c.tarefa || "") ? "Concluído / Não faturado" : "Em andamento" };
+    }
+    if (processo.statusAtual === "protocolado" && c.statusParcela === "Em andamento" && /protocolo/i.test(c.tarefa || "")) {
       return { ...c, statusParcela: "Concluído / Não faturado" };
     }
     return c;
@@ -4745,33 +4763,20 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
   const updateProcesso = (novo) => {
     setProcessos((prev) => prev.map((p) => (p.id === novo.id ? novo : p)));
     supabase.from("processos").update(processoToRow(novo)).eq("id", novo.id).then(() => {});
-    // Sempre que um processo já iniciado é salvo: a parcela de Sinal (se houver e
-    // ainda estiver "Pendente") vai para "Concluído / Não faturado"; as demais
-    // parcelas "Pendente" desse serviço passam para "Em andamento". Roda em toda
-    // atualização (não só no instante de iniciar) para também corrigir sozinho
-    // registros antigos que ficaram com a parcela desatualizada.
+    // Mantém as parcelas em Contratos sincronizadas com o andamento do processo
+    // (roda em toda atualização, não só nas transições, para também corrigir
+    // sozinho registros antigos que ficaram desatualizados).
     if (novo.statusAtual !== "aguardando") {
       setContratos((prev) => {
-        const norm = (s) => (s || "").trim().toLowerCase();
-        const afetadas = prev.filter((c) => norm(c.cliente) === norm(novo.cliente) && norm(c.unidade) === norm(novo.unidade) && norm(c.servico) === norm(novo.assunto) && c.statusParcela === "Pendente");
-        if (!afetadas.length) return prev;
-        const novoStatusPorId = {};
-        afetadas.forEach((c) => { novoStatusPorId[c.id] = /sinal/i.test(c.tarefa || "") ? "Concluído / Não faturado" : "Em andamento"; });
-        Object.entries(novoStatusPorId).forEach(([id, status]) => {
-          supabase.from("contratos").update({ status_parcela: status }).eq("id", id).then(() => {});
-        });
-        return prev.map((c) => (novoStatusPorId[c.id] ? { ...c, statusParcela: novoStatusPorId[c.id] } : c));
+        const sincronizados = sincronizarParcelasComProcesso(novo, prev);
+        sincronizados.forEach((c, i) => { if (c !== prev[i]) supabase.from("contratos").update({ status_parcela: c.statusParcela }).eq("id", c.id).then(() => {}); });
+        return sincronizados;
       });
     }
   };
   const concluirProcesso = (novo) => {
     updateProcesso(novo);
     setSelected(novo);
-    setContratos((prev) => {
-      const sincronizados = sincronizarParcelasNaConclusao(novo, prev);
-      sincronizados.forEach((c, i) => { if (c !== prev[i]) supabase.from("contratos").update({ status_parcela: c.statusParcela }).eq("id", c.id).then(() => {}); });
-      return sincronizados;
-    });
   };
 
   // Concilia uma planilha importada com o que já está salvo no banco:
