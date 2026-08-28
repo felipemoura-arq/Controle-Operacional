@@ -4743,17 +4743,24 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
   const isDashboard = tab === "dashboard-processos" || tab === "dashboard-financeiro";
   const isClientes = tab === "clientes" || tab === "unidades" || tab === "contratos" || tab === "importar-contratos" || tab === "financeiro";
   const updateProcesso = (novo) => {
-    const anterior = processos.find((p) => p.id === novo.id);
     setProcessos((prev) => prev.map((p) => (p.id === novo.id ? novo : p)));
     supabase.from("processos").update(processoToRow(novo)).eq("id", novo.id).then(() => {});
-    // Ao iniciar o serviço, as parcelas "Pendente" desse serviço passam para "Em andamento"
-    if (anterior && anterior.statusAtual === "aguardando" && novo.statusAtual !== "aguardando") {
+    // Sempre que um processo já iniciado é salvo: a parcela de Sinal (se houver e
+    // ainda estiver "Pendente") vai para "Concluído / Não faturado"; as demais
+    // parcelas "Pendente" desse serviço passam para "Em andamento". Roda em toda
+    // atualização (não só no instante de iniciar) para também corrigir sozinho
+    // registros antigos que ficaram com a parcela desatualizada.
+    if (novo.statusAtual !== "aguardando") {
       setContratos((prev) => {
-        const afetadas = prev.filter((c) => c.numeroContrato === novo.numeroContrato && c.cliente === novo.cliente && c.unidade === novo.unidade && c.servico === novo.assunto && c.statusParcela === "Pendente");
+        const norm = (s) => (s || "").trim().toLowerCase();
+        const afetadas = prev.filter((c) => norm(c.cliente) === norm(novo.cliente) && norm(c.unidade) === norm(novo.unidade) && norm(c.servico) === norm(novo.assunto) && c.statusParcela === "Pendente");
         if (!afetadas.length) return prev;
-        const ids = afetadas.map((c) => c.id);
-        supabase.from("contratos").update({ status_parcela: "Em andamento" }).in("id", ids).then(() => {});
-        return prev.map((c) => (ids.includes(c.id) ? { ...c, statusParcela: "Em andamento" } : c));
+        const novoStatusPorId = {};
+        afetadas.forEach((c) => { novoStatusPorId[c.id] = /sinal/i.test(c.tarefa || "") ? "Concluído / Não faturado" : "Em andamento"; });
+        Object.entries(novoStatusPorId).forEach(([id, status]) => {
+          supabase.from("contratos").update({ status_parcela: status }).eq("id", id).then(() => {});
+        });
+        return prev.map((c) => (novoStatusPorId[c.id] ? { ...c, statusParcela: novoStatusPorId[c.id] } : c));
       });
     }
   };
