@@ -394,6 +394,7 @@ function baseProcesso(p) {
     dataAtendimentoTecnico: p.dataAtendimentoTecnico || null, dataAtendimentoExigencia: p.dataAtendimentoExigencia || null,
     dataConclusao: p.dataConclusao || null,
     dataPrevistaVistoria: p.dataPrevistaVistoria || null, dataPrevisaoEntrega: p.dataPrevisaoEntrega || null,
+    vistoriaNecessaria: p.vistoriaNecessaria !== undefined ? p.vistoriaNecessaria : null, numeroProtocolo: p.numeroProtocolo || "-",
     cobrancas: p.cobrancas || [], pendenciaCliente: p.pendenciaCliente || { ativa: false, descricao: "" },
     ultimaAtualizacao: p.ultimaAtualizacao || d(0),
     site: p.site || "-", login: p.login || "-", senha: p.senha || "-",
@@ -433,6 +434,7 @@ function rowToProcesso(r) {
     dataExigenciaRecebida: r.data_exigencia_recebida, dataExigenciaPrazoLimite: r.data_exigencia_prazo_limite,
     dataAtendimentoTecnico: r.data_atendimento_tecnico, dataAtendimentoExigencia: r.data_atendimento_exigencia,
     dataConclusao: r.data_conclusao, dataPrevistaVistoria: r.data_prevista_vistoria, dataPrevisaoEntrega: r.data_previsao_entrega,
+    vistoriaNecessaria: r.vistoria_necessaria, numeroProtocolo: r.numero_protocolo,
     ultimaAtualizacao: r.ultima_atualizacao,
     site: r.site, login: r.login, senha: r.senha,
     dependeDeId: r.depende_de_id, dependeDeOutros: r.depende_de_outros, dependeDeOutrosDescricao: r.depende_de_outros_descricao,
@@ -460,6 +462,7 @@ function processoToRow(p) {
     data_exigencia_recebida: p.dataExigenciaRecebida || null, data_exigencia_prazo_limite: p.dataExigenciaPrazoLimite || null,
     data_atendimento_tecnico: p.dataAtendimentoTecnico || null, data_atendimento_exigencia: p.dataAtendimentoExigencia || null,
     data_conclusao: p.dataConclusao || null, data_prevista_vistoria: p.dataPrevistaVistoria || null, data_previsao_entrega: p.dataPrevisaoEntrega || null,
+    vistoria_necessaria: p.vistoriaNecessaria, numero_protocolo: p.numeroProtocolo,
     ultima_atualizacao: p.ultimaAtualizacao || null,
     site: p.site, login: p.login, senha: p.senha,
     depende_de_id: p.dependeDeId, depende_de_outros: p.dependeDeOutros, depende_de_outros_descricao: p.dependeDeOutrosDescricao,
@@ -1755,38 +1758,49 @@ function DetailModal({ processo, processos, contratos, onClose, onUpdate, onOpen
 
           {iniciado && tab === "geral" && (
             <div>
-              <Row label="Cidade / UF" value={`${processo.cidade} - ${processo.uf}`} />
+              <Row label="Cliente" value={processo.cliente} />
+              <Row label="Unidade" value={processo.unidade} />
+              <Row label="Serviço" value={processo.assunto} />
               <Row label="Tipo de serviço" value={processo.tipo} />
               <Row label="Técnico" value={processo.tecnico} />
 
+              <RowEditavel label="Data de início" tipo="date" valor={processo.dataInicio} onConfirmar={(v) => patch({ dataInicio: v })} />
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
+                <span style={{ fontSize: 12, color: COLORS.steel }}>Vistoria necessária?</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[[true, "Sim"], [false, "Não"]].map(([v, l]) => (
+                    <button key={l} onClick={() => patch({ vistoriaNecessaria: v })} style={{
+                      fontSize: 11, fontWeight: 700, borderRadius: 999, padding: "4px 12px", cursor: "pointer",
+                      background: processo.vistoriaNecessaria === v ? COLORS.redDim : "transparent",
+                      color: processo.vistoriaNecessaria === v ? COLORS.red : COLORS.steel,
+                      border: `1px solid ${processo.vistoriaNecessaria === v ? COLORS.red + "55" : COLORS.border}`,
+                    }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {processo.vistoriaNecessaria && <RowEditavel label="Data de vistoria" tipo="date" valor={processo.dataPrevistaVistoria} onConfirmar={(v) => patch({ dataPrevistaVistoria: v })} />}
+
               {processo.tipo === "Serviço Técnico" ? (
-                <>
-                  <Row label="Data de início" value={fmtDate(processo.dataInicio)} />
-                  <Row label="Data prevista de vistoria" value={fmtDate(processo.dataPrevistaVistoria)} />
-                  <Row label="Previsão de conclusão / entrega" value={fmtDate(processo.dataPrevisaoOrgao)} />
-                  <Row label="Data de conclusão" value={fmtDate(processo.dataConclusao)} />
-                </>
+                <RowEditavel label="Previsão de conclusão / entrega" tipo="date" valor={processo.dataPrevisaoOrgao} onConfirmar={(v) => patch({ dataPrevisaoOrgao: v })} />
               ) : (
                 <>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-                    <span style={{ fontSize: 12, color: COLORS.steel }}>Nº do processo</span>
-                    <input value={processo.numero === "-" ? "" : processo.numero} onChange={(e) => patch({ numero: e.target.value || "-" })} placeholder="Preencher quando obtido"
-                      style={{ background: "transparent", border: "none", borderBottom: `1px dashed ${COLORS.border}`, color: COLORS.ice, fontSize: 13, textAlign: "right", padding: "2px 0" }} />
-                  </div>
-                  <Row label="Data de início" value={fmtDate(processo.dataInicio)} />
-                  <Row label="Previsão de análise/checklist" value={fmtDate(processo.dataPrevisaoAnaliseChecklist)} />
-                  <Row label="Data prevista de protocolo" value={fmtDate(processo.dataPrevistaProtocolo)} />
-                  <Row label="Data de protocolo" value={fmtDate(processo.dataProtocolo)} />
-                  <Row label="Previsão de análise do órgão" value={fmtDate(processo.dataPrevisaoOrgao)} />
-                  <Row label="Exigência recebida" value={fmtDate(processo.dataExigenciaRecebida)} />
-                  <Row label="Prazo limite para atendimento" value={fmtDate(processo.dataExigenciaPrazoLimite)} />
-                  <Row label="Atendimento técnico" value={fmtDate(processo.dataAtendimentoTecnico)} />
-                  <Row label="Exigência atendida" value={fmtDate(processo.dataAtendimentoExigencia)} />
-                  <Row label="Data de conclusão" value={fmtDate(processo.dataConclusao)} />
+                  <RowEditavel label="Nº do processo" tipo="text" valor={processo.numero === "-" ? "" : processo.numero} onConfirmar={(v) => patch({ numero: v })} />
+                  <RowEditavel label="Previsão de análise/checklist" tipo="date" valor={processo.dataPrevisaoAnaliseChecklist} onConfirmar={(v) => patch({ dataPrevisaoAnaliseChecklist: v })} />
+                  <RowEditavel label="Data prevista de protocolo" tipo="date" valor={processo.dataPrevistaProtocolo} onConfirmar={(v) => patch({ dataPrevistaProtocolo: v })} />
+                  <RowEditavel label="Data de protocolo" tipo="date" valor={processo.dataProtocolo} onConfirmar={(v) => patch({ dataProtocolo: v })} />
+                  <RowEditavel label="Nº do protocolo" tipo="text" valor={processo.numeroProtocolo === "-" ? "" : processo.numeroProtocolo} onConfirmar={(v) => patch({ numeroProtocolo: v })} />
+                  <RowEditavel label="Previsão de análise do órgão / conclusão" tipo="date" valor={processo.dataPrevisaoOrgao} onConfirmar={(v) => patch({ dataPrevisaoOrgao: v })} />
+                  <RowEditavel label="Exigência recebida" tipo="date" valor={processo.dataExigenciaRecebida} onConfirmar={(v) => patch({ dataExigenciaRecebida: v })} />
+                  <RowEditavel label="Prazo limite para atendimento" tipo="date" valor={processo.dataExigenciaPrazoLimite} onConfirmar={(v) => patch({ dataExigenciaPrazoLimite: v })} />
+                  <RowEditavel label="Atendimento técnico" tipo="date" valor={processo.dataAtendimentoTecnico} onConfirmar={(v) => patch({ dataAtendimentoTecnico: v })} />
+                  <RowEditavel label="Exigência atendida" tipo="date" valor={processo.dataAtendimentoExigencia} onConfirmar={(v) => patch({ dataAtendimentoExigencia: v })} />
                 </>
               )}
 
-              <Row label="Prestador" value={processo.prestador || "—"} />
+              <RowEditavel label="Data de conclusão" tipo="date" valor={processo.dataConclusao} onConfirmar={(v) => patch({ dataConclusao: v })} />
+              <RowEditavel label="Prestador / Fornecedor" tipo="text" valor={processo.prestador === "-" ? "" : processo.prestador} onConfirmar={(v) => patch({ prestador: v })} />
+
               <Row label="Site do órgão" value={processo.site || "—"} />
               <Row label="Login" value={processo.login || "—"} />
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
@@ -1849,7 +1863,7 @@ function DetailModal({ processo, processos, contratos, onClose, onUpdate, onOpen
                     <option value="outros">Outros</option>
                   </select>
                   {processo.dependeDeOutros && (
-                    <RowEditavel label="Descreva a dependência" tipo="text" campo="dependeDeOutrosDescricao" largura="100%" />
+                    <RowEditavel label="Descreva a dependência" tipo="text" valor={processo.dependeDeOutrosDescricao} largura="100%" onConfirmar={(v) => patch({ dependeDeOutrosDescricao: v })} />
                   )}
                   {bloqueadoPor && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, background: COLORS.redDim, border: `1px solid ${COLORS.red}55`, borderRadius: 8, padding: "9px 12px" }}>
@@ -3449,6 +3463,31 @@ function CampoComConfirmacao({ tipo, valor, opcoes, onConfirmar, corTexto, largu
           <CheckCircle2 size={13} color="#0a1420" />
         </button>
       )}
+    </div>
+  );
+}
+
+/* Linha "rótulo à esquerda / campo à direita" editável com botão de
+   confirmação — usada na Visão Geral do processo. Componente de
+   módulo de verdade (nunca declarar componentes dentro de outros!). */
+function RowEditavel({ label, tipo, valor, onConfirmar, largura }) {
+  const [pendente, setPendente] = useState(valor || "");
+  useEffect(() => { setPendente(valor || ""); }, [valor]);
+  const mudou = pendente !== (valor || "");
+  const confirmar = () => onConfirmar(tipo === "text" ? (pendente.trim() || "-") : (pendente || null));
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLORS.border}`, gap: 10 }}>
+      <span style={{ fontSize: 12, color: COLORS.steel, flexShrink: 0 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input type={tipo === "date" ? "date" : "text"} value={pendente} onChange={(e) => setPendente(e.target.value)}
+          placeholder={tipo === "date" ? "" : "Preencher..."}
+          style={{ background: "transparent", border: "none", borderBottom: `1px dashed ${COLORS.border}`, color: COLORS.ice, fontSize: 13, textAlign: "right", padding: "2px 0", width: largura || (tipo === "date" ? 130 : 160) }} />
+        {mudou && (
+          <button onClick={confirmar} title="Confirmar alteração" style={{ background: COLORS.green, border: "none", borderRadius: 5, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+            <CheckCircle2 size={12} color="#0a1420" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
