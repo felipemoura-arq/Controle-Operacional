@@ -969,130 +969,94 @@ function NewProcessModal({ onClose, onSave, processos, isAdmin }) {
 /* ============================================================
    CHECKLIST TAB
    ============================================================ */
-function ChecklistTab({ processo, onUpdate }) {
-  const [novoItem, setNovoItem] = useState("");
-  const itens = processo.checklist.itens || [];
-  const progresso = checklistProgress(processo.checklist);
-
-  const adicionar = () => {
-    if (!novoItem.trim()) return;
-    const novo = { id: `chk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, item: novoItem.trim(), status: "Não temos" };
-    onUpdate({ ...processo, checklist: { itens: [...itens, novo] } });
-    setNovoItem("");
-  };
-  const setStatus = (id, status) => {
-    onUpdate({ ...processo, checklist: { itens: itens.map((it) => (it.id === id ? { ...it, status } : it)) } });
-  };
-  const remover = (id) => {
-    onUpdate({ ...processo, checklist: { itens: itens.filter((it) => it.id !== id) } });
-  };
-
-  const STATUS_CHECKLIST = { "Temos": { cor: COLORS.green, icon: CheckCircle2 }, "Não temos": { cor: COLORS.red, icon: XCircle }, "N/A": { cor: COLORS.steel, icon: MinusCircle } };
-
-  return (
-    <div>
-      <p style={{ fontSize: 12, color: COLORS.steel, lineHeight: 1.6, marginBottom: 16 }}>
-        Relação dos documentos/itens exigidos para este {processo.tipo === "Serviço Técnico" ? "serviço" : "processo"}. Adicione cada item necessário e marque se já temos ou não.
-      </p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontSize: 12.5, color: COLORS.steelLight }}>{itens.length} item(ns) cadastrado(s)</div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conformidade</div>
-          <div style={{ fontSize: 20, color: progresso === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progresso}%</div>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        <input value={novoItem} onChange={(e) => setNovoItem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && adicionar()}
-          placeholder="Nome do documento/item exigido (ex: Matrícula do imóvel)..."
-          style={{ flex: 1, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "9px 11px", color: COLORS.ice, fontSize: 12.5, outline: "none" }} />
-        <button onClick={adicionar} style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.red, border: "none", color: "#fff", borderRadius: 6, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.02em", textTransform: "uppercase" }}>
-          <Plus size={13} /> Adicionar
-        </button>
-      </div>
-
-      {itens.length === 0 && <div style={{ padding: 24, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum item cadastrado ainda.</div>}
-      {itens.map((it) => (
-        <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-          <div style={{ fontSize: 12.5, color: COLORS.ice, flex: 1 }}>{it.item}</div>
-          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-            {Object.entries(STATUS_CHECKLIST).map(([s, cfg]) => (
-              <button key={s} onClick={() => setStatus(it.id, s)} title={s} style={{
-                width: 26, height: 26, borderRadius: 6, border: `1px solid ${it.status === s ? cfg.cor : COLORS.border}`,
-                background: it.status === s ? `${cfg.cor}22` : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-              }}><cfg.icon size={14} color={it.status === s ? cfg.cor : COLORS.steel} /></button>
-            ))}
-            <button onClick={() => remover(it.id)} title="Remover item" style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${COLORS.red}55`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-              <Trash2 size={12} color={COLORS.red} />
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /* ============================================================
-   DOCUMENTOS TAB — checklist documental com anexo, responsáveis
-   técnicos e enquadramentos especiais
+   DOCUMENTOS E CHECKLIST — aba unificada. Cada linha combina o
+   status do documento (Recebido/Obtido/Pendente) com o status no
+   checklist (Temos/Não temos/N/A) na mesma tabela.
    ============================================================ */
-function DocumentosTab({ processo, onUpdate }) {
-  const itens = processo.documentos.itens || [];
-  const progresso = documentosProgress(processo.documentos);
-  const [novo, setNovo] = useState({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "", enviarChecklist: true });
+function DocumentosChecklistTab({ processo, onUpdate }) {
+  const docs = processo.documentos.itens || [];
+  const chkAll = processo.checklist.itens || [];
+  const norm = (s) => (s || "").trim().toLowerCase();
+
+  const chkPorNome = {};
+  chkAll.forEach((c) => { chkPorNome[norm(c.item)] = c; });
+  const idsChkUsados = new Set();
+  const linhas = docs.map((d) => {
+    const match = chkPorNome[norm(d.nome)];
+    if (match) idsChkUsados.add(match.id);
+    return { key: `doc-${d.id}`, docId: d.id, chkId: match ? match.id : null, nome: d.nome, descricao: d.descricao, statusDoc: d.status, statusChk: match ? match.status : null, validade: d.validade, observacao: d.observacao };
+  });
+  chkAll.filter((c) => !idsChkUsados.has(c.id)).forEach((c) => {
+    linhas.push({ key: `chk-${c.id}`, docId: null, chkId: c.id, nome: c.item, descricao: "", statusDoc: null, statusChk: c.status, validade: null, observacao: "" });
+  });
+
+  const progDoc = documentosProgress(processo.documentos);
+  const progChk = checklistProgress(processo.checklist);
+
+  const [novo, setNovo] = useState({ nome: "", descricao: "", statusDoc: "Pendente", statusChk: "Não temos", validade: "", observacao: "" });
+
+  const STATUS_DOC_OPCOES = ["Recebido", "Obtido", "Pendente"];
+  const STATUS_CHK_OPCOES = ["nao_rastrear", "Temos", "Não temos", "N/A"];
+  const corStatusDoc = (s) => (s === "Pendente" ? COLORS.orange : COLORS.green);
+  const STATUS_CHK_CFG = { "Temos": { cor: COLORS.green, icon: CheckCircle2 }, "Não temos": { cor: COLORS.red, icon: XCircle }, "N/A": { cor: COLORS.steel, icon: MinusCircle } };
 
   const adicionar = () => {
     if (!novo.nome.trim()) return;
-    const item = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: novo.nome.trim(), descricao: novo.descricao.trim(), status: novo.status, validade: novo.validade || null, observacao: novo.observacao.trim(), criadoEm: hojeISOStr() };
+    const nomeFinal = novo.nome.trim();
+    const docItem = { id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, nome: nomeFinal, descricao: novo.descricao.trim(), status: novo.statusDoc, validade: novo.validade || null, observacao: novo.observacao.trim(), criadoEm: hojeISOStr() };
     let checklist = processo.checklist;
-    if (novo.enviarChecklist) {
-      const itensChecklist = processo.checklist.itens || [];
-      const jaExiste = itensChecklist.some((it) => it.item.trim().toLowerCase() === item.nome.trim().toLowerCase());
-      if (!jaExiste) {
-        checklist = { itens: [...itensChecklist, { id: `chk-doc-${item.id}`, item: item.nome, status: "Não temos" }] };
-      }
+    if (novo.statusChk !== "nao_rastrear") {
+      const jaExiste = chkAll.some((c) => norm(c.item) === norm(nomeFinal));
+      if (!jaExiste) checklist = { itens: [...chkAll, { id: `chk-doc-${docItem.id}`, item: nomeFinal, status: novo.statusChk }] };
     }
-    onUpdate({ ...processo, documentos: { itens: [...itens, item] }, checklist });
-    setNovo({ nome: "", descricao: "", status: "Pendente", validade: "", observacao: "", enviarChecklist: true });
+    onUpdate({ ...processo, documentos: { itens: [...docs, docItem] }, checklist });
+    setNovo({ nome: "", descricao: "", statusDoc: "Pendente", statusChk: "Não temos", validade: "", observacao: "" });
   };
-  const patchItem = (id, fields) => onUpdate({ ...processo, documentos: { itens: itens.map((it) => (it.id === id ? { ...it, ...fields } : it)) } });
-  const remover = (id) => onUpdate({ ...processo, documentos: { itens: itens.filter((it) => it.id !== id) } });
+  const patchDoc = (docId, fields) => onUpdate({ ...processo, documentos: { itens: docs.map((d) => (d.id === docId ? { ...d, ...fields } : d)) } });
+  const patchChk = (chkId, fields) => onUpdate({ ...processo, checklist: { itens: chkAll.map((c) => (c.id === chkId ? { ...c, ...fields } : c)) } });
+  const criarChecklistParaLinha = (linha) => onUpdate({ ...processo, checklist: { itens: [...chkAll, { id: `chk-doc-${linha.docId || Date.now()}`, item: linha.nome, status: "Não temos" }] } });
+  const removerLinha = (linha) => {
+    let documentos = processo.documentos, checklist = processo.checklist;
+    if (linha.docId) documentos = { itens: docs.filter((d) => d.id !== linha.docId) };
+    if (linha.chkId) checklist = { itens: chkAll.filter((c) => c.id !== linha.chkId) };
+    onUpdate({ ...processo, documentos, checklist });
+  };
 
-  const addResponsavel = () => onUpdate({ ...processo, responsaveisTecnicos: [...processo.responsaveisTecnicos, novoResponsavelTecnico()] });
-  const patchResponsavel = (id, fields) => onUpdate({ ...processo, responsaveisTecnicos: processo.responsaveisTecnicos.map((r) => (r.id === id ? { ...r, ...fields } : r)) });
-  const removeResponsavel = (id) => onUpdate({ ...processo, responsaveisTecnicos: processo.responsaveisTecnicos.filter((r) => r.id !== id) });
-
-  const patchEnquadramento = (k, fields) => onUpdate({ ...processo, enquadramentos: { ...processo.enquadramentos, [k]: { ...processo.enquadramentos[k], ...fields } } });
-
-  const STATUS_DOC_OPCOES = ["Recebido", "Obtido", "Pendente"];
-  const corStatusDoc = (s) => s === "Pendente" ? COLORS.orange : COLORS.green;
+  const thStyle = { textAlign: "left", padding: "8px 10px", fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${COLORS.border}`, whiteSpace: "nowrap" };
+  const tdStyle = { padding: "9px 10px", fontSize: 12, color: COLORS.steelLight, borderBottom: `1px solid ${COLORS.border}`, verticalAlign: "top" };
 
   return (
     <div>
       <p style={{ fontSize: 12, color: COLORS.steel, lineHeight: 1.6, marginBottom: 16 }}>
-        Análise documental: registre aqui cada documento recebido do cliente ou obtido junto ao órgão, com descrição, status e validade.
+        Registre aqui cada documento recebido do cliente ou obtido junto ao órgão, e marque de uma vez se ele também está no checklist de exigências.
       </p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontSize: 12.5, color: COLORS.steelLight }}>{itens.length} documento(s) registrado(s)</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginBottom: 16 }}>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recebidos/obtidos</div>
-          <div style={{ fontSize: 20, color: progresso === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progresso}%</div>
+          <div style={{ fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recebidos/obtidos</div>
+          <div style={{ fontSize: 18, color: progDoc === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progDoc}%</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 10, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conformidade checklist</div>
+          <div style={{ fontSize: 18, color: progChk === 100 ? COLORS.green : COLORS.ice, fontWeight: 700, fontFamily: "'Oswald', sans-serif" }}>{progChk}%</div>
         </div>
       </div>
 
       <div style={{ background: COLORS.panelAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14, marginBottom: 18 }}>
-        <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, marginBottom: 10 }}>Adicionar documento</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 0.7fr", gap: 8, marginBottom: 8 }}>
-          <input placeholder="Nome do documento" value={novo.nome} onChange={(e) => setNovo((n) => ({ ...n, nome: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
+        <div style={{ fontSize: 11, color: COLORS.steel, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, marginBottom: 10 }}>Adicionar item</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 0.8fr 0.8fr", gap: 8, marginBottom: 8 }}>
+          <input placeholder="Nome do documento/item" value={novo.nome} onChange={(e) => setNovo((n) => ({ ...n, nome: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
           <input placeholder="Descrição" value={novo.descricao} onChange={(e) => setNovo((n) => ({ ...n, descricao: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
-          <select value={novo.status} onChange={(e) => setNovo((n) => ({ ...n, status: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }}>
+          <select value={novo.statusDoc} onChange={(e) => setNovo((n) => ({ ...n, statusDoc: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }}>
             {STATUS_DOC_OPCOES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          <select value={novo.statusChk} onChange={(e) => setNovo((n) => ({ ...n, statusChk: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }}>
+            <option value="nao_rastrear">Não rastrear no checklist</option>
+            <option value="Temos">Checklist: Temos</option>
+            <option value="Não temos">Checklist: Não temos</option>
+            <option value="N/A">Checklist: N/A</option>
+          </select>
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8, cursor: "pointer" }}>
-          <input type="checkbox" checked={novo.enviarChecklist} onChange={(e) => setNovo((n) => ({ ...n, enviarChecklist: e.target.checked }))} />
-          <span style={{ fontSize: 11.5, color: COLORS.steelLight }}>Incluir automaticamente este documento no Checklist</span>
-        </label>
         <div style={{ display: "grid", gridTemplateColumns: "0.6fr 1fr auto", gap: 8 }}>
           <input type="date" value={novo.validade} onChange={(e) => setNovo((n) => ({ ...n, validade: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
           <input placeholder="Observação" value={novo.observacao} onChange={(e) => setNovo((n) => ({ ...n, observacao: e.target.value }))} style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "7px 9px", color: COLORS.ice, fontSize: 12 }} />
@@ -1102,31 +1066,55 @@ function DocumentosTab({ processo, onUpdate }) {
         </div>
       </div>
 
-      {itens.length === 0 && <div style={{ padding: 20, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum documento registrado ainda.</div>}
-      {itens.map((it) => (
-        <div key={it.id} style={{ padding: "10px 0", borderBottom: `1px solid ${COLORS.border}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12.5, color: COLORS.ice, fontWeight: 600 }}>{it.nome}</div>
-              {it.descricao && <div style={{ fontSize: 11.5, color: COLORS.steel, marginTop: 2 }}>{it.descricao}</div>}
-              <div style={{ display: "flex", gap: 12, marginTop: 5, fontSize: 11, color: COLORS.steel }}>
-                {it.validade && <span>Validade: <b style={{ color: new Date(it.validade) < hoje ? COLORS.red : COLORS.steelLight }}>{fmtDate(it.validade)}</b></span>}
-                {it.observacao && <span>{it.observacao}</span>}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
-              <CampoComConfirmacao tipo="select" valor={it.status} opcoes={STATUS_DOC_OPCOES} onConfirmar={(v) => patchItem(it.id, { status: v })} corTexto={corStatusDoc(it.status)} largura={140} />
-              <button onClick={() => remover(it.id)} title="Remover documento" style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${COLORS.red}55`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                <Trash2 size={12} color={COLORS.red} />
-              </button>
-            </div>
-          </div>
-        </div>
-      ))}
-
+      <div style={{ overflowX: "auto", border: `1px solid ${COLORS.border}`, borderRadius: 8 }}>
+        <table>
+          <thead><tr>
+            <th style={thStyle}>Nome</th><th style={thStyle}>Descrição</th><th style={thStyle}>Status documento</th>
+            <th style={thStyle}>Checklist</th><th style={thStyle}>Validade</th><th style={thStyle}>Observação</th><th style={thStyle}></th>
+          </tr></thead>
+          <tbody>
+            {linhas.map((linha) => (
+              <tr key={linha.key}>
+                <td style={{ ...tdStyle, color: COLORS.ice, fontWeight: 600 }}>{linha.nome}</td>
+                <td style={tdStyle}>{linha.descricao || "—"}</td>
+                <td style={tdStyle}>
+                  {linha.docId ? (
+                    <CampoComConfirmacao tipo="select" valor={linha.statusDoc} opcoes={STATUS_DOC_OPCOES} onConfirmar={(v) => patchDoc(linha.docId, { status: v })} corTexto={corStatusDoc(linha.statusDoc)} largura={120} />
+                  ) : <span style={{ color: COLORS.steel }}>—</span>}
+                </td>
+                <td style={tdStyle}>
+                  {linha.chkId ? (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {Object.entries(STATUS_CHK_CFG).map(([s, cfg]) => (
+                        <button key={s} onClick={() => patchChk(linha.chkId, { status: s })} title={s} style={{
+                          width: 24, height: 24, borderRadius: 5, border: `1px solid ${linha.statusChk === s ? cfg.cor : COLORS.border}`,
+                          background: linha.statusChk === s ? `${cfg.cor}22` : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0,
+                        }}><cfg.icon size={13} color={linha.statusChk === s ? cfg.cor : COLORS.steel} /></button>
+                      ))}
+                    </div>
+                  ) : (
+                    <button onClick={() => criarChecklistParaLinha(linha)} style={{ background: "transparent", border: `1px dashed ${COLORS.border}`, color: COLORS.steel, borderRadius: 5, padding: "4px 8px", fontSize: 10.5, cursor: "pointer", whiteSpace: "nowrap" }}>
+                      + Checklist
+                    </button>
+                  )}
+                </td>
+                <td style={tdStyle}>{linha.validade ? <span style={{ color: new Date(linha.validade) < hoje ? COLORS.red : COLORS.steelLight }}>{fmtDate(linha.validade)}</span> : "—"}</td>
+                <td style={tdStyle}>{linha.observacao || "—"}</td>
+                <td style={tdStyle}>
+                  <button onClick={() => removerLinha(linha)} title="Remover" style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${COLORS.red}55`, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                    <Trash2 size={11} color={COLORS.red} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {linhas.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: COLORS.steel, fontSize: 13 }}>Nenhum documento ou item de checklist registrado ainda.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
+
 
 /* ============================================================
    PARÂMETROS URBANÍSTICOS TAB
@@ -1715,8 +1703,7 @@ function DetailModal({ processo, processos, contratos, onClose, onUpdate, onOpen
             <div style={{ display: "flex", gap: 4, marginTop: 14, flexWrap: "wrap" }}>
               {[
                 ["geral", "Visão geral", Building2],
-                ["documentos", "Documentos Recebidos", FileStack],
-                ["checklist", "Checklist", ClipboardCheck],
+                ["documentos", "Documentos e Checklist", FileStack],
                 ["linhadotempo", "Linha do tempo", Timer],
                 ["atualizacoes", `Status de Serviço (${processo.atualizacoes.length})`, History],
                 ["relatorio", "Relatório", Download],
@@ -1891,8 +1878,7 @@ function DetailModal({ processo, processos, contratos, onClose, onUpdate, onOpen
               )}
             </div>
           )}
-          {iniciado && tab === "documentos" && <DocumentosTab processo={processo} onUpdate={onUpdate} />}
-          {iniciado && tab === "checklist" && <ChecklistTab processo={processo} onUpdate={onUpdate} />}
+          {iniciado && tab === "documentos" && <DocumentosChecklistTab processo={processo} onUpdate={onUpdate} />}
           {iniciado && tab === "linhadotempo" && <LinhaDoTempoTab processo={processo} />}
           {iniciado && tab === "atualizacoes" && <AtualizacoesTab processo={processo} onUpdate={onUpdate} />}
           {iniciado && tab === "relatorio" && <RelatorioTab processo={processo} />}
@@ -3401,7 +3387,7 @@ function LoginScreen({ onLogin, logoBase64 }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; } ::placeholder { color: ${COLORS.steel}; opacity: 0.7; }`}</style>
       <div style={{ width: "100%", maxWidth: 360, background: COLORS.panel, border: `1px solid ${COLORS.borderStrong}`, borderRadius: 12, padding: 32 }}>
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 56, maxWidth: 220, objectFit: "contain", marginBottom: 10 }} />}
+          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 100, maxWidth: 230, objectFit: "contain", marginBottom: 10 }} />}
           <div style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 18, color: COLORS.ice, letterSpacing: "0.02em", textTransform: "uppercase" }}>Controle Operacional</div>
           <div style={{ fontSize: 10.5, color: COLORS.steel, letterSpacing: "0.06em", marginTop: 4 }}>Acesso restrito</div>
         </div>
@@ -4890,7 +4876,7 @@ function ControleProcessos({ usuarioLogado, onLogout, logoBase64, onLogoAtualiza
       {/* SIDEBAR */}
       <aside style={{ width: 230, background: COLORS.panel, borderRight: `1px solid ${COLORS.border}`, padding: "22px 16px", flexShrink: 0 }}>
         <div style={{ marginBottom: 22 }}>
-          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 42, maxWidth: 190, objectFit: "contain", marginBottom: 8, display: "block" }} />}
+          {logoBase64 && <img src={logoBase64} alt="Logo" style={{ maxHeight: 80, maxWidth: 190, objectFit: "contain", marginBottom: 8, display: "block" }} />}
           <div style={{ fontFamily: "'Oswald', sans-serif", fontWeight: 700, fontSize: 15, color: COLORS.ice, letterSpacing: "0.02em", textTransform: "uppercase" }}>Controle Operacional</div>
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 3 }}>
